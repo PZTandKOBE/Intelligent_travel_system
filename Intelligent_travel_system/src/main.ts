@@ -1,15 +1,20 @@
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import App from './App.vue'
-import router from './router' // 稍后我们会创建这个
+import router from './router'
 
-// 样式引入
+// 1. 引入 Vant 核心库
+import Vant from 'vant'
+
 import './style.css'
 import 'vant/lib/index.css'
 
 const app = createApp(App)
 
 app.use(createPinia())
-app.use(router) 
+app.use(router)
+
+// 3. 注册 Vant 组件库
+app.use(Vant) 
 
 app.mount('#app')
