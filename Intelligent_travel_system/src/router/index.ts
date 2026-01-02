@@ -1,54 +1,47 @@
-import { createRouter, createWebHistory } from 'vue-router';
+import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router';
 
-// 路由定义
-const routes = [
+// 引入页面组件
+// 请确保路径正确，如果不正确请修正为你的实际路径
+import Login from '../views/Login/index.vue';
+import Chat from '../views/Chat/index.vue';
+import User from '../views/User/index.vue';
+import Document from '../views/User/Document.vue'; 
+import History from '../views/Chat/History.vue';
+
+const routes: RouteRecordRaw[] = [
   {
     path: '/',
-    name: 'Home',
-    component: () => import('../views/Home/index.vue'),
-    meta: { requiresAuth: false } // 首页公开
+    redirect: '/chat', // 默认跳到对话页
   },
   {
     path: '/login',
     name: 'Login',
-    component: () => import('../views/Login/index.vue'),
-    meta: { requiresAuth: false } // 登录页公开
+    component: Login,
+    meta: { title: '登录' }
   },
   {
     path: '/chat',
     name: 'Chat',
-    component: () => import('../views/Chat/index.vue'),
-    meta: { requiresAuth: true } // ⚠️ 聊天页需要登录
+    component: Chat,
+    meta: { title: '智能伴游', requiresAuth: true }
   },
   {
-    path: '/user',
-    name: 'User',
-    component: () => import('../views/User/index.vue'),
-    meta: { requiresAuth: true } // 个人中心必须登录
-  },
-  {
-    path: '/chat',
-    name: 'Chat',
-    component: () => import('../views/Chat/index.vue'),
-    meta: { requiresAuth: true }
-  },
-  {
-    path: '/chat/history', // ✅ 新增历史列表页
+    path: '/chat/history',
     name: 'ChatHistory',
-    component: () => import('../views/Chat/History.vue'),
-    meta: { requiresAuth: true }
+    component: History,
+    meta: { title: '历史会话', requiresAuth: true }
   },
   {
     path: '/user',
     name: 'User',
-    component: () => import('../views/User/index.vue'),
-    meta: { requiresAuth: true }
+    component: User,
+    meta: { title: '个人中心', requiresAuth: true }
   },
   {
-    path: '/user/document', // ✅ 新增
+    path: '/user/document',
     name: 'UserDocument',
-    component: () => import('../views/User/Document.vue'),
-    meta: { requiresAuth: true }
+    component: Document,
+    meta: { title: '游览报告', requiresAuth: true }
   }
 ];
 
@@ -57,27 +50,14 @@ const router = createRouter({
   routes,
 });
 
-// 全局前置守卫
+// 路由守卫
 router.beforeEach((to, from, next) => {
-  // 从 localStorage 获取 token
-  const token = localStorage.getItem('token');
+  // 设置页面标题
+  document.title = (to.meta.title as string) || '非遗伴游';
   
-  // 1. 访问需要权限的页面
-  if (to.meta.requiresAuth) {
-    if (token) {
-      next(); // 有 Token，放行
-    } else {
-      next('/login'); // 无 Token，重定向到登录页
-    }
-  } 
-  // 2. 已登录状态下访问登录页 (自动跳转到 Chat)
-  else if (to.path === '/login' && token) {
-    next('/chat');
-  } 
-  // 3. 其他情况 (如访问首页)
-  else {
-    next();
-  }
+  // ✅ 核心修改：移除所有 Token 检查逻辑！
+  // 直接放行，认证交给接口状态码控制
+  next(); 
 });
 
 export default router;

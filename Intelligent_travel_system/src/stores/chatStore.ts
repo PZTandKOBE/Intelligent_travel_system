@@ -9,8 +9,8 @@ export const useChatStore = defineStore('chat', () => {
   const messages = ref<ChatMessage[]>([]);
   // 是否正在流式输出
   const isStreaming = ref(false);
-  // 当前会话 ID (为空表示新会话)
-  const currentConversationId = ref<string>('');
+  // 当前会话 ID
+  const currentConversationId = ref<number | null>(null);
   // 会话列表数据
   const conversationList = ref<ConversationItem[]>([]);
 
@@ -20,18 +20,19 @@ export const useChatStore = defineStore('chat', () => {
 
   // 1. 初始化新会话
   const initChat = async (lat: number, lng: number) => {
-    // 每次进入新会话，清空数据
     messages.value = [];
-    currentConversationId.value = ''; 
+    currentConversationId.value = null; 
     
     try {
-      // 调用初始化接口获取欢迎语
       const data = await http.post<ChatInitResponse>('/chat/init', { lat, lng });
       
+      // 保存会话ID
+      currentConversationId.value = data.conversationId;
+
       addMessage({
         id: 'init-welcome',
         role: 'assistant',
-        content: `${data.welcomeMessage}\n\n当前天气：${data.weather}`,
+        content: `${data.welcomeMessage}\n\n当前天气：${data.envContext.weather} ${data.envContext.temperature}℃`,
         type: 'text',
         createdAt: Date.now(),
       });
@@ -40,7 +41,7 @@ export const useChatStore = defineStore('chat', () => {
       addMessage({
         id: 'init-fail',
         role: 'assistant',
-        content: '你好！我是非遗小助手。虽然网络有点波动，但我依然可以为你服务。',
+        content: '你好！我是非遗小助手。',
         type: 'text',
         createdAt: Date.now(),
       });
@@ -52,14 +53,13 @@ export const useChatStore = defineStore('chat', () => {
     if (!content.trim() || isStreaming.value) return;
 
     // 1. 上屏用户消息
-    const userMsg: ChatMessage = {
+    addMessage({
       id: Date.now().toString(),
       role: 'user',
       content,
       type: 'text',
       createdAt: Date.now(),
-    };
-    addMessage(userMsg);
+    });
 
     // 2. 预占位 AI 消息
     const aiMsgId = (Date.now() + 1).toString();
@@ -67,7 +67,7 @@ export const useChatStore = defineStore('chat', () => {
       id: aiMsgId,
       role: 'assistant',
       content: '',
-      type: 'text',
+      type: 'text', // 默认为 text, 如果 SSE 返回了 location 数据，我们在回调里修改
       isLoading: true,
       createdAt: Date.now(),
     });
@@ -75,66 +75,94 @@ export const useChatStore = defineStore('chat', () => {
     isStreaming.value = true;
 
     // 3. 准备请求体
-    // 如果是历史会话续聊，尝试带上 conversationId (取决于后端是否支持显式传参)
     const body: any = { message: content };
+    // 如果有 conversationId，带上
     if (currentConversationId.value) {
       body.conversationId = currentConversationId.value;
     }
 
     // 4. 发起 SSE 请求
+    // 假设后端 endpoint 是 /api/chat/send
     await fetchStream(
       '/api/chat/send',
       body,
       {
-        onMessage: (chunk) => {
+        onMessage: (type, data) => {
           if (aiMsg.value.isLoading) aiMsg.value.isLoading = false;
-          aiMsg.value.content += chunk;
+
+          // 根据事件类型处理
+          switch (type) {
+            case 'message':
+              // data 是文本片段
+              if (typeof data === 'string') {
+                 aiMsg.value.content += data;
+              }
+              break;
+            
+            case 'conversationId':
+              // 如果是新会话，后端可能会返回 ID
+              currentConversationId.value = Number(data);
+              break;
+            
+            case 'status':
+              // 例如 "thinking" 或 "answering"，目前前端只显示 isLoading，暂不处理
+              break;
+
+            case 'error':
+              aiMsg.value.content += `\n[错误: ${data}]`;
+              break;
+              
+            // 如果后端直接返回复杂的 JSON 对象用于渲染卡片
+            // 比如 event: location_recommend, data: { ... }
+            // 这里可以扩展
+          }
         },
         onDone: () => {
           isStreaming.value = false;
-          // 如果后端在 SSE 结束时返回了新的 conversationId，可以在这里更新
-          // 暂时假设逻辑是依赖前端状态
         },
-        onError: () => {
-          aiMsg.value.content += '\n[网络异常，请重试]';
+        onError: (err) => {
+          console.error('SSE Error:', err);
+          aiMsg.value.content += '\n[网络连接异常]';
           isStreaming.value = false;
         },
       }
     );
   };
 
-  // 3. 获取会话列表 (用于历史记录页)
+  // 3. 获取会话列表
   const fetchConversations = async () => {
     try {
-      // POST /chat/conversations
-      const res = await http.post<ConversationItem[]>('/chat/conversations', {});
-      conversationList.value = res || [];
+      const res: any = await http.post('/chat/conversations', { current: 1, pageSize: 20 });
+      conversationList.value = res.records || [];
     } catch (error) {
       console.error('获取会话列表失败', error);
       conversationList.value = [];
     }
   };
 
-  // 4. 加载特定历史会话 (用于回看)
+  // 4. 加载特定历史会话
   const loadHistory = async (id: string) => {
-    messages.value = []; // 先清空
-    currentConversationId.value = id; // 标记当前 ID
+    messages.value = [];
+    currentConversationId.value = Number(id);
 
     try {
-      // GET /chat/history/{id}
+      // 接口返回的是消息数组
       const res = await http.get<ChatMessage[]>(`/chat/history/${id}`);
       
       if (Array.isArray(res)) {
-        messages.value = res;
-      } else {
-        messages.value = [];
+        messages.value = res.map(msg => ({
+          ...msg,
+          // 确保字段兼容，比如后端返回的可能是 created_at 下划线风格，需注意转换
+          // 这里假设后端已按 camelCase 返回
+          isLoading: false
+        }));
       }
     } catch (error) {
       console.error('加载历史记录失败', error);
       addMessage({
         id: 'err',
         role: 'assistant',
-        content: '无法加载历史记录，请重试。',
+        content: '无法加载历史记录。',
         type: 'text',
         createdAt: Date.now()
       });

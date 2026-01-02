@@ -46,11 +46,14 @@
               class="mt-2"
             />
 
-            <ProductCard 
-              v-if="msg.type === 'product' && msg.product" 
-              :data="msg.product"
-              class="mt-2"
-            />
+            <template v-if="msg.type === 'product' && msg.products">
+              <ProductCard 
+                v-for="(prod, idx) in msg.products" 
+                :key="idx"
+                :data="prod"
+                class="mt-2"
+              />
+            </template>
 
           </div>
 
@@ -95,19 +98,19 @@
 
 <script setup lang="ts">
 import { ref, onMounted, nextTick, watch } from 'vue';
-import { useRoute } from 'vue-router'; // 引入路由钩子
+import { useRoute } from 'vue-router';
 import { useChatStore } from '../../stores/chatStore';
 import LocationCard from './LocationCard.vue';
 import ProductCard from './ProductCard.vue';
 
-const route = useRoute(); // 获取路由实例
+const route = useRoute();
 const chatStore = useChatStore();
 const inputContent = ref('');
 const chatContainer = ref<HTMLElement | null>(null);
 
-// 格式化时间
-const formatTime = (timestamp: number) => {
-  return new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+const formatTime = (time: string | number) => {
+  const date = new Date(time);
+  return isNaN(date.getTime()) ? '' : date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 };
 
 const scrollToBottom = () => {
@@ -119,22 +122,18 @@ const scrollToBottom = () => {
 };
 
 watch(() => chatStore.messages.length, scrollToBottom);
-// 深度监听内容变化，保证流式输出时一直滚动到底部
+// 深度监听，保证流式输出时持续滚动
 watch(() => chatStore.messages[chatStore.messages.length - 1], () => {
   scrollToBottom();
 }, { deep: true });
 
 onMounted(() => {
-  // 核心逻辑：区分“新会话”和“历史回看”
   const historyId = route.query.id as string;
 
   if (historyId) {
-    // 模式 A: 加载历史记录
-    // 注意：这里我们假设 loadHistory 会处理 messages 的填充
     chatStore.loadHistory(historyId);
   } else {
-    // 模式 B: 初始化新会话
-    // 模拟获取地理位置 (实际项目建议用 navigator.geolocation 获取真实坐标)
+    // 默认坐标：广州 (实际开发请接入 navigator.geolocation)
     chatStore.initChat(23.1291, 113.2644);
   }
   
@@ -149,7 +148,6 @@ const handleSend = () => {
 </script>
 
 <style scoped>
-/* 适配 iPhone X 等底部安全区 */
 .safe-area-bottom {
   padding-bottom: constant(safe-area-inset-bottom);
   padding-bottom: env(safe-area-inset-bottom);

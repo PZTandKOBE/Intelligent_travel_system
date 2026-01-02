@@ -8,25 +8,28 @@ export interface ApiResponse<T = any> {
 // 用户信息
 export interface UserInfo {
   id: number;
+  userName: string; // 文档返回的是 userName
+  userAvatar?: string;
   email: string;
-  nickname?: string;
-  avatar?: string;
 }
 
 // 登录请求参数
 export interface LoginRequest {
   email: string;
-  password?: string;
+  password: string;
 }
 
-// 注册请求参数 (适配验证码流程)
+// 注册请求参数 (已补全)
 export interface RegisterRequest {
   email: string;
-  password?: string;
-  code: string; // 必填：验证码
+  code: string;
+  userPassword?: string;  // 后端叫 userPassword
+  checkPassword?: string; // 后端叫 checkPassword
+  userName?: string;      // 选填
+  userAvatar?: string;    // 选填
 }
 
-// ... 之前的 Chat 消息类型保持不变
+// 消息类型
 export type MessageType = 'text' | 'location' | 'product';
 
 export interface LocationData {
@@ -43,10 +46,11 @@ export interface LocationData {
 
 export interface ProductData {
   name: string;
-  shopName: string;
-  price: string;
-  imageUrl: string;
-  jumpUrl?: string;
+  shop: string; // 文档是 shop
+  price?: string;
+  imageUrl?: string;
+  shopLat?: number;
+  shopLng?: number;
 }
 
 export interface ChatMessage {
@@ -55,45 +59,41 @@ export interface ChatMessage {
   content: string;
   type: MessageType;
   location?: LocationData;
-  product?: ProductData;
+  products?: ProductData[]; // 文档返回的是 products 数组
   isLoading?: boolean;
-  createdAt: number;
+  createdAt: string | number; // 兼容后端可能返回 ISO 字符串
 }
 
 export interface ChatInitResponse {
+  conversationId: number; // 文档返回的是 number
   welcomeMessage: string;
-  weather: string;
-  bgStyle?: string;
+  envContext: {
+    city: string;
+    district: string;
+    weather: string;
+    temperature: number;
+    outdoorSuitable: boolean;
+  };
 }
 
-// 会话列表项 (对应 POST /chat/conversations 的返回项)
+// 会话列表项
 export interface ConversationItem {
-  id: string;          // 会话ID
-  title: string;       // 会话标题 (通常是第一句话的摘要)
-  lastMessage?: string; // 最后一条消息预览
-  createdAt: number;   // 创建时间
-  updatedAt: number;   // 更新时间
+  id: number;
+  userId: number;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
-// 历史记录详情响应 (对应 GET /chat/history/{id})
-export interface ChatHistoryResponse {
-  id: string;
-  title: string;
-  messages: ChatMessage[]; // 复用之前的 ChatMessage 类型
-}
+// 历史记录响应 (直接是数组)
+export type ChatHistoryResponse = ChatMessage[];
 
 // 游览报告项
 export interface DocumentItem {
-  id: string;
-  title: string;       // 报告标题，如 "2023-10-01 姑苏非遗之旅"
-  summary?: string;    // 简短描述
-  pdfUrl: string;      // PDF 文件地址
-  coverUrl?: string;   // 封面图 (可选)
-  createdAt: number;   // 生成时间
-}
-
-// 游览报告请求 (如果 /document/my 需要参数，比如分页)
-export interface DocumentListRequest {
-  page?: number;
-  size?: number;
+  id: number;
+  userId: number;
+  projectId: number;
+  title?: string; // 前端可能需要自己拼标题
+  fileUrl: string;
+  createdAt: string;
 }

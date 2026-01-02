@@ -5,17 +5,12 @@ import { showToast } from 'vant';
 const instance = axios.create({
   baseURL: '/api', // 配合 vite.config.ts 的 proxy
   timeout: 10000,
+  withCredentials: true, // ✅ 必须开启，否则无法维持登录状态
 });
 
 // 请求拦截器
 instance.interceptors.request.use(
   (config) => {
-    // ✅ 核心修改：从 localStorage 读取 Token 并添加到 Header
-    const token = localStorage.getItem('token');
-    if (token) {
-      // 假设后端遵循 Bearer Token 标准，如果后端不需要 'Bearer ' 前缀，请去掉
-      config.headers.Authorization = `Bearer ${token}`; 
-    }
     return config;
   },
   (error) => Promise.reject(error)
@@ -25,17 +20,38 @@ instance.interceptors.request.use(
 instance.interceptors.response.use(
   (response) => {
     const res = response.data;
-    // 假设后端 code !== 0 代表业务错误
+    
+    // 如果后端用 200 返回业务错误 (例如 code=401 代表未登录)
     if (res.code !== undefined && res.code !== 0) {
+      // 特殊处理业务层面的未登录
+      if (res.code === 401) {
+        showToast('登录已过期');
+        setTimeout(() => window.location.href = '/login', 1500);
+        return Promise.reject(new Error(res.message));
+      }
+
       showToast(res.message || '请求失败');
       return Promise.reject(new Error(res.message));
     }
-    // 直接返回业务数据 data
+    
+    // 成功，直接返回 data
     return res.data;
   },
   (error) => {
     // 处理 HTTP 状态码错误
+    const status = error.response?.status;
     const msg = error.response?.data?.message || error.message || '网络异常';
+
+    // ✅ 核心修改：捕获 401 Unauthorized 错误
+    if (status === 401) {
+      showToast('登录已过期，请重新登录');
+      // 使用 window.location.href 强制跳转，确保清理状态
+      setTimeout(() => {
+        window.location.href = '/login';
+      }, 1500);
+      return Promise.reject(error);
+    }
+
     showToast(msg);
     return Promise.reject(error);
   }
@@ -48,6 +64,12 @@ const http = {
   },
   post: <T = any>(url: string, data?: any, config?: AxiosRequestConfig): Promise<T> => {
     return instance.post(url, data, config);
+  },
+  put: <T = any>(url: string, data?: any, config?: AxiosRequestConfig): Promise<T> => {
+    return instance.put(url, data, config);
+  },
+  delete: <T = any>(url: string, config?: AxiosRequestConfig): Promise<T> => {
+    return instance.delete(url, config);
   },
 };
 
