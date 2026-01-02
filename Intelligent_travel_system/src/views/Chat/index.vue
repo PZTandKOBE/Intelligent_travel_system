@@ -1,6 +1,12 @@
 <template>
   <div class="flex flex-col h-screen bg-gray-50">
-    <van-nav-bar title="非遗伴游" left-arrow @click-left="$router.back()" fixed placeholder z-index="50" />
+    <van-nav-bar title="非遗伴游" left-arrow @click-left="$router.back()" fixed placeholder z-index="50">
+      <template #right>
+        <div @click="$router.push('/user')" class="flex items-center justify-center w-8 h-8 bg-gray-100 rounded-full cursor-pointer hover:bg-gray-200 transition-colors">
+          <span class="text-sm">👤</span>
+        </div>
+      </template>
+    </van-nav-bar>
 
     <div class="flex-1 overflow-y-auto p-4 space-y-6" ref="chatContainer">
       <div v-for="msg in chatStore.messages" :key="msg.id" class="flex flex-col">
@@ -89,10 +95,12 @@
 
 <script setup lang="ts">
 import { ref, onMounted, nextTick, watch } from 'vue';
+import { useRoute } from 'vue-router'; // 引入路由钩子
 import { useChatStore } from '../../stores/chatStore';
-import LocationCard from '../../components/Chat/LocationCard.vue';
-import ProductCard from '../../components/Chat/ProductCard.vue';
+import LocationCard from './LocationCard.vue';
+import ProductCard from './ProductCard.vue';
 
+const route = useRoute(); // 获取路由实例
 const chatStore = useChatStore();
 const inputContent = ref('');
 const chatContainer = ref<HTMLElement | null>(null);
@@ -117,8 +125,19 @@ watch(() => chatStore.messages[chatStore.messages.length - 1], () => {
 }, { deep: true });
 
 onMounted(() => {
-  // 模拟初始化位置：广州 (真实项目请换成 navigator.geolocation)
-  chatStore.initChat(23.1291, 113.2644);
+  // 核心逻辑：区分“新会话”和“历史回看”
+  const historyId = route.query.id as string;
+
+  if (historyId) {
+    // 模式 A: 加载历史记录
+    // 注意：这里我们假设 loadHistory 会处理 messages 的填充
+    chatStore.loadHistory(historyId);
+  } else {
+    // 模式 B: 初始化新会话
+    // 模拟获取地理位置 (实际项目建议用 navigator.geolocation 获取真实坐标)
+    chatStore.initChat(23.1291, 113.2644);
+  }
+  
   scrollToBottom();
 });
 

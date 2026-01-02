@@ -3,8 +3,15 @@
     "composite": true,
     "skipLibCheck": true,
     "module": "ESNext",
-    "moduleResolution": "Node",
-    "allowSyntheticDefaultImports": true
+    // 关键修改：将 "Node" 改为 "bundler" 以支持现代模块解析
+    "moduleResolution": "bundler", 
+    "allowSyntheticDefaultImports": true,
+    // 建议补充以下配置以获得更好的类型检查支持
+    "strict": true,
+    "jsx": "preserve",
+    "esModuleInterop": true,
+    "lib": ["esnext", "dom"]
   },
-  "include": ["vite.config.ts"]
+  // 保持包含 vite.config.ts
+  "include": ["vite.config.ts", "src/**/*.ts", "src/**/*.d.ts", "src/**/*.tsx", "src/**/*.vue"]
 }
