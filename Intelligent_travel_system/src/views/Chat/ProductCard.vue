@@ -7,7 +7,7 @@
     <div class="flex-1 p-2 flex flex-col justify-between">
       <div>
         <h4 class="text-sm font-bold text-gray-800 line-clamp-2">{{ data.name }}</h4>
-        <p class="text-xs text-gray-400 mt-1">{{ data.shopName }}</p>
+        <p class="text-xs text-gray-400 mt-1">{{ data.shop }}</p>
       </div>
       
       <div class="flex justify-between items-end mt-2">

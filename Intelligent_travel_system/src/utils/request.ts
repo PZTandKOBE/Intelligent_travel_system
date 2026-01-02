@@ -34,7 +34,7 @@ instance.interceptors.response.use(
       return Promise.reject(new Error(res.message));
     }
     
-    // 成功，直接返回 data
+    // 成功，直接返回 data 里的实际数据模型
     return res.data;
   },
   (error) => {

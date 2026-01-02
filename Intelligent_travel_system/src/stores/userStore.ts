@@ -29,7 +29,8 @@ export const useUserStore = defineStore('user', () => {
         userPassword: payload.password,
         checkPassword: payload.password,
         userName: `用户${payload.email.split('@')[0]}`,
-        userAvatar: "" 
+        // 注册时头像留空，让后端处理或显示默认图
+        userAvatar: undefined 
       };
       await http.post('/user/register/email', requestBody);
       showToast('注册成功，请登录');
@@ -44,8 +45,11 @@ export const useUserStore = defineStore('user', () => {
   const login = async (req: LoginRequest) => {
     try {
       const res = await http.post<UserInfo>('/user/login/email', req);
-      if (res && res.id) {
-        userInfo.value = res; 
+      // 兼容后端可能直接返回 data 或者是嵌套结构
+      const userData = (res as any).data || res;
+      
+      if (userData && userData.id) {
+        userInfo.value = userData;
         showToast('登录成功');
         return true;
       } else {
@@ -62,9 +66,16 @@ export const useUserStore = defineStore('user', () => {
   const fetchUserInfo = async () => {
     try {
       const res = await http.get<UserInfo>('/user/get/login');
-      userInfo.value = res;
-    } catch (error) {
-      userInfo.value = null;
+      // 只有成功获取到数据才更新，防止网络波动导致这里置空
+      if (res && res.id) {
+        userInfo.value = res;
+      }
+    } catch (error: any) {
+      // 只有 401 才是真的未登录，其他错误不要轻易置空 userInfo
+      // request.ts 拦截器已经处理了 401 跳转，这里主要处理数据同步
+      console.error('获取用户信息失败', error);
+      // 如果确认是未登录，可以在这里置空，但要谨慎
+      // userInfo.value = null; 
     }
   };
 
@@ -77,42 +88,69 @@ export const useUserStore = defineStore('user', () => {
     } finally {
       userInfo.value = null;
       showToast('已退出登录');
+      // 可以选择跳转到登录页
+      window.location.href = '/login';
     }
   };
 
-  // 6. 更新用户信息 (已修复：界面不更新问题)
+  // ✅ 新增：文件上传
+  const uploadFile = async (file: File) => {
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      
+      // 注意：根据后端文档，接口是 /file/test/upload
+      // 如果 request.ts 自动处理了 Content-Type，这里不需要手动设置 multipart/form-data，
+      // 但显式声明更安全。
+      const res = await http.post<string>('/file/test/upload', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+      
+      // 假设后端返回的是图片路径字符串
+      return res; 
+    } catch (error) {
+      console.error('文件上传失败:', error);
+      showToast('图片上传失败');
+      return null;
+    }
+  };
+
+  // 6. 更新用户信息 (修复状态丢失问题)
   const updateProfile = async (userName: string, userAvatar?: string) => {
     try {
       await http.post('/user/update/my', { userName, userAvatar });
       showToast('更新成功');
       
-      // ✅ 核心修复：后端可能有延迟，前端先手动更新本地数据，确保界面立刻变化
+      // ✅ 乐观更新：直接修改本地数据，不等待 fetchUserInfo
+      // 这样可以避免 fetchUserInfo 失败或延迟导致的“未登录”闪烁
       if (userInfo.value) {
         userInfo.value.userName = userName;
-        if (userAvatar) userInfo.value.userAvatar = userAvatar;
+        if (userAvatar) {
+          userInfo.value.userAvatar = userAvatar;
+        }
       }
       
-      // 后台默默再拉一次最新数据
-      fetchUserInfo();
+      // 延时一点再拉取最新数据，确保后端已落库
+      setTimeout(() => {
+        fetchUserInfo();
+      }, 500);
+
       return true;
     } catch (error) {
       console.error('更新失败:', error);
+      showToast('更新失败，请重试');
       return false;
     }
   };
 
-  // 7. 获取我的游览报告 (已修复：报错问题)
+  // 7. 获取我的游览报告
   const fetchDocuments = async () => {
     try {
-      // 这里的 API 返回结构包含 records
       const res: any = await http.post('/document/my', { current: 1, pageSize: 20 });
       documentList.value = res.records || [];
     } catch (error) {
       console.error('获取文档列表失败:', error);
-      // 如果后端挂了，置为空数组，防止页面无限 loading 或报错
       documentList.value = [];
-      // 可以在这里提示用户
-      // showToast('游览报告服务暂不可用');
     }
   };
 
@@ -123,6 +161,7 @@ export const useUserStore = defineStore('user', () => {
     login,
     register,
     logout,
+    uploadFile, 
     fetchUserInfo,
     updateProfile,
     fetchDocuments

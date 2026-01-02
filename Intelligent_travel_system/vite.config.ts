@@ -1,27 +1,21 @@
-import { defineConfig } from 'vite'
-import vue from '@vitejs/plugin-vue'
-import path from 'path'
+import { defineConfig } from 'vite';
+import vue from '@vitejs/plugin-vue';
 
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [vue()],
-  resolve: {
-    alias: {
-      '@': path.resolve(__dirname, './src')
-    }
-  },
   server: {
-    port: 5173, // 前端开发端口，保持默认即可
+    port: 5173,
     proxy: {
       '/api': {
-        // ✅ 修改这里：指向你的远程后端 IP 和端口
+        // ✅ 确保这里是你的后端真实地址
         target: 'http://14.103.124.109:8080', 
         changeOrigin: true,
-        // ⚠️ 注意：通常后端接口如果是 http://...:8080/api/user/...
-        // 前端请求 /api/user/... 时，不需要 rewrite 去掉 /api
-        // 如果你的后端接口路径里本身就包含 /api，请注释掉下面这行 rewrite
-        // rewrite: (path) => path.replace(/^\/api/, '') 
-      }
-    }
-  }
-})
+        // rewrite: (path) => path.replace(/^\/api/, ''), // 如果后端接口不需要 /api 前缀，请取消注释这行
+        // 注意：根据你的 request.ts 和 chatStore，前端发出的请求带 /api
+        // 如果后端路由是 /user/login 而不是 /api/user/login，则必须开启 rewrite
+        rewrite: (path) => path.replace(/^\/api/, '')
+      },
+    },
+  },
+});

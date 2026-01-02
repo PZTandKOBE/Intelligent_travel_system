@@ -1,112 +1,185 @@
 <template>
   <div class="min-h-screen bg-gray-50 pb-20">
-    <van-nav-bar title="个人中心" fixed placeholder />
+    <van-nav-bar
+      title="个人中心"
+      left-text="返回"
+      left-arrow
+      fixed
+      placeholder
+      @click-left="onClickLeft"
+    />
 
-    <div class="bg-indigo-600 px-6 pt-10 pb-16 text-white relative overflow-hidden">
+    <div class="bg-indigo-600 text-white pt-8 pb-12 px-6 rounded-b-[2rem] shadow-lg relative overflow-hidden">
       <div class="absolute top-0 right-0 w-32 h-32 bg-white opacity-10 rounded-full transform translate-x-10 -translate-y-10"></div>
       
-      <div class="flex items-center gap-4 relative z-10">
-        <div class="w-16 h-16 rounded-full bg-white/20 border-2 border-white/30 flex items-center justify-center overflow-hidden">
-          <img v-if="userStore.userInfo?.userAvatar" :src="userStore.userInfo.userAvatar" class="w-full h-full object-cover" />
-          <span v-else class="text-3xl">👤</span>
+      <div class="relative z-10 flex items-center space-x-4">
+        <div class="w-20 h-20 rounded-full border-4 border-white/30 overflow-hidden bg-white/20 backdrop-blur-sm shadow-inner">
+          <img 
+            :src="userStore.userInfo?.userAvatar || defaultAvatar" 
+            class="w-full h-full object-cover"
+            alt="User Avatar"
+          />
         </div>
+        
         <div class="flex-1">
-          <h2 class="text-xl font-bold mb-1">{{ userStore.userInfo?.userName || '未登录' }}</h2>
-          <p class="text-indigo-200 text-sm">{{ userStore.userInfo?.email || '点击登录开启旅程' }}</p>
+          <template v-if="userStore.userInfo">
+            <h2 class="text-2xl font-bold">{{ userStore.userInfo.userName }}</h2>
+            <p class="text-indigo-100 text-sm mt-1 opacity-90">{{ userStore.userInfo.email }}</p>
+          </template>
+          <template v-else>
+            <h2 class="text-xl font-bold" @click="router.push('/login')">未登录</h2>
+            <p class="text-indigo-200 text-sm mt-1">点击登录体验更多功能</p>
+          </template>
         </div>
+
+        <button 
+          v-if="userStore.userInfo"
+          @click="showEditDialog = true"
+          class="bg-white/20 hover:bg-white/30 p-2 rounded-full transition-colors backdrop-blur-md"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+          </svg>
+        </button>
       </div>
     </div>
 
-    <div class="px-4 -mt-8 relative z-20">
+    <div class="px-4 -mt-6 relative z-20">
       <div class="bg-white rounded-xl shadow-sm overflow-hidden mb-4">
-        <van-cell-group :border="false">
-          <van-cell title="编辑资料" is-link icon="edit" @click="openEditModal" />
-          <van-cell title="我的游览报告" is-link icon="orders-o" to="/user/document" />
-        </van-cell-group>
+        <van-cell title="我的游览报告" is-link to="/user/documents" icon="orders-o" size="large" />
+        <van-cell title="历史会话" is-link to="/chat" icon="chat-o" size="large" />
+        <van-cell title="修改密码" is-link @click="showToast('暂未开放')" icon="lock" size="large" />
+        <van-cell title="关于我们" is-link icon="info-o" size="large" />
       </div>
 
-      <div class="bg-white rounded-xl shadow-sm overflow-hidden mb-4">
-        <van-cell-group :border="false">
-          <van-cell title="历史会话" is-link icon="chat-o" to="/chat/history" />
-          <van-cell title="关于我们" is-link icon="info-o" @click="showAbout = true" />
-          <van-cell title="意见反馈" is-link icon="comment-o" @click="handleFeedback" />
-        </van-cell-group>
-      </div>
-
-      <div class="px-2 mt-8">
-        <van-button block color="#ee0a24" plain @click="handleLogout">退出登录</van-button>
+      <div class="bg-white rounded-xl shadow-sm overflow-hidden" v-if="userStore.userInfo">
+        <van-cell title="退出登录" @click="handleLogout" icon="revoke" class="text-red-500" size="large" center />
       </div>
     </div>
 
-    <van-dialog v-model:show="showEdit" title="编辑资料" show-cancel-button @confirm="handleSaveProfile">
-      <div class="p-4 space-y-4">
-        <div class="flex flex-col items-center mb-4">
-           <div class="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mb-2">
-             <img v-if="editForm.avatar" :src="editForm.avatar" class="w-full h-full rounded-full object-cover"/>
-             <span v-else class="text-2xl text-gray-400">📷</span>
+    <van-dialog 
+      v-model:show="showEditDialog" 
+      title="编辑资料" 
+      show-cancel-button
+      @confirm="handleUpdateProfile"
+      :before-close="onBeforeClose"
+    >
+      <div class="p-6 flex flex-col items-center space-y-6">
+        <van-uploader :after-read="onAvatarUpload" max-count="1" :show-upload="false">
+           <div class="relative group cursor-pointer">
+              <div class="w-24 h-24 rounded-full overflow-hidden border-2 border-gray-200">
+                <img 
+                  :src="editForm.userAvatar || userStore.userInfo?.userAvatar || defaultAvatar" 
+                  class="w-full h-full object-cover"
+                />
+              </div>
+              <div class="absolute inset-0 bg-black/40 flex items-center justify-center rounded-full opacity-0 group-hover:opacity-100 transition-opacity">
+                <span class="text-white text-xs">更换头像</span>
+              </div>
            </div>
-           <p class="text-xs text-gray-400">头像上传功能开发中</p>
-        </div>
-        <van-field v-model="editForm.nickname" label="昵称" placeholder="请输入新昵称" input-align="right" />
+        </van-uploader>
+
+        <van-field
+          v-model="editForm.userName"
+          label="昵称"
+          placeholder="请输入新昵称"
+          input-align="right"
+          border
+        />
       </div>
     </van-dialog>
-
-    <van-dialog v-model:show="showAbout" title="关于非遗伴游">
-      <div class="p-6 text-center text-gray-600 text-sm leading-relaxed">
-        <p class="mb-4">非遗文化智能伴游系统</p>
-        <p>版本 v1.0.0</p>
-        <p class="mt-4 text-xs text-gray-400">
-          致力于通过 AI 技术<br>带您领略中华非物质文化遗产的魅力
-        </p>
-      </div>
-    </van-dialog>
-
-    </div>
+  </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, reactive } from 'vue';
+import { onMounted, ref, reactive, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { useUserStore } from '../../stores/userStore';
 import { showToast, showDialog } from 'vant';
 
 const router = useRouter();
 const userStore = useUserStore();
+const defaultAvatar = 'https://cube.elemecdn.com/3/7c/3ea6beec64369c2642b92c6726f1epng.png';
 
-const showEdit = ref(false);
-const showAbout = ref(false);
-
+const showEditDialog = ref(false);
 const editForm = reactive({
-  nickname: '',
-  avatar: ''
+  userName: '',
+  userAvatar: ''
 });
 
+// ✅ 1. 返回按钮逻辑
+const onClickLeft = () => {
+  router.back();
+};
+
+// 2. 初始化数据
 onMounted(() => {
-  // 进来时获取最新信息
-  userStore.fetchUserInfo();
+  if (!userStore.userInfo) {
+    userStore.fetchUserInfo();
+  } else {
+    syncEditForm();
+  }
 });
 
-const openEditModal = () => {
-  if (!userStore.userInfo) return showToast('请先登录');
-  editForm.nickname = userStore.userInfo.userName || '';
-  editForm.avatar = userStore.userInfo.userAvatar || '';
-  showEdit.value = true;
+// 监听 userInfo 变化，同步到编辑表单
+watch(() => userStore.userInfo, (newVal) => {
+  if (newVal) {
+    syncEditForm();
+  }
+}, { immediate: true });
+
+function syncEditForm() {
+  if (userStore.userInfo) {
+    editForm.userName = userStore.userInfo.userName;
+    editForm.userAvatar = userStore.userInfo.userAvatar || '';
+  }
+}
+
+// ✅ 3. 头像上传逻辑
+const onAvatarUpload = async (file: any) => {
+  showToast({ message: '上传中...', type: 'loading' });
+  // 调用 Store 的上传方法
+  const url = await userStore.uploadFile(file.file);
+  
+  if (url) {
+    // 假设后端返回的是相对路径，如果需要可以拼完整 URL，这里暂时直接用
+    // 如果图片不显示，可能需要拼 http://后端IP:端口 + url
+    editForm.userAvatar = url; 
+    showToast('上传成功，记得点击确定保存哦');
+  }
 };
 
-const handleSaveProfile = async () => {
-  if (!editForm.nickname) {
+// ✅ 4. 保存修改
+const handleUpdateProfile = async () => {
+  if (!editForm.userName.trim()) {
     showToast('昵称不能为空');
-    return;
+    return false;
   }
-  // 调用 Store 更新
-  const success = await userStore.updateProfile(editForm.nickname, editForm.avatar);
+  
+  // 1. 调用更新接口
+  const success = await userStore.updateProfile(editForm.userName, editForm.userAvatar);
+  
   if (success) {
-    showEdit.value = false;
+    // 2. 成功后，手动强制修改 store 中的数据，确保 UI 立即刷新
+    if (userStore.userInfo) {
+        userStore.userInfo.userName = editForm.userName;
+        if (editForm.userAvatar) {
+            userStore.userInfo.userAvatar = editForm.userAvatar;
+        }
+    }
+    showEditDialog.value = false; // 关闭弹窗
+  } else {
+    // 失败保持弹窗打开
+    showEditDialog.value = true;
   }
 };
 
-const handleFeedback = () => {
-  showToast('该功能暂未开放');
+const onBeforeClose = (action: string) => {
+  if (action === 'confirm') {
+    // 允许异步关闭，逻辑在 handleUpdateProfile 处理
+    return true; 
+  }
+  return true;
 };
 
 const handleLogout = () => {
@@ -116,7 +189,19 @@ const handleLogout = () => {
     showCancelButton: true,
   }).then(() => {
     userStore.logout();
-    router.replace('/login');
+    router.push('/login');
   }).catch(() => {});
 };
 </script>
+
+<style scoped>
+:deep(.van-nav-bar__content) {
+  background-color: transparent;
+}
+:deep(.van-nav-bar .van-icon) {
+  color: #4f46e5; /* Indigo-600 */
+}
+:deep(.van-nav-bar__text) {
+  color: #4f46e5;
+}
+</style>
