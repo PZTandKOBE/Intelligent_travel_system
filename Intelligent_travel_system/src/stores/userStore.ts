@@ -121,7 +121,7 @@ export const useUserStore = defineStore('user', () => {
       const params = new URLSearchParams();
       params.append('oldPassword', payload.oldPassword);
       params.append('newPassword', payload.newPassword);
-      params.append('checkPassword', payload.checkPassword);
+      params.append('checkPassword', payload.confirmPassword);
 
       // 发送请求，指定 Content-Type
       await http.post('/user/update/password', params, {

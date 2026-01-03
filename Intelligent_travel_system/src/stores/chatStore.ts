@@ -50,26 +50,21 @@ export const useChatStore = defineStore('chat', () => {
     }
   };
 
-  /**
-   * 发送消息 (已修复 JSON 解析报错)
-   */
 const sendMessage = async (content: string) => {
     if (isStreaming.value || !content.trim()) return;
 
     // 1. 用户消息上屏
-    const userMsg: ChatMessage = {
+    messages.value.push({
       id: `user-${Date.now()}`,
       role: 'user',
       content: content,
       type: 'text',
       createdAt: Date.now()
-    };
-    messages.value.push(userMsg);
+    });
 
     // 2. AI 消息占位
-    const assistantMsgId = `ai-${Date.now()}`;
     const assistantMsg = ref<ChatMessage>({
-      id: assistantMsgId,
+      id: `ai-${Date.now()}`,
       role: 'assistant',
       content: '', 
       type: 'text',
@@ -81,26 +76,18 @@ const sendMessage = async (content: string) => {
     isStreaming.value = true;
 
     try {
-      console.log('开始请求后端...'); // Debug日志
       const response = await fetch('/api/chat/send', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          // 'Authorization': `Bearer ${token}` 
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: content,
           conversationId: currentConversationId.value,
         })
       });
 
-      if (!response.ok) {
-        throw new Error(`请求报错: ${response.status}`);
-      }
-
+      if (!response.ok) throw new Error(`请求报错: ${response.status}`);
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
-
       if (!reader) throw new Error('无法获取流');
 
       while (true) {
@@ -108,41 +95,49 @@ const sendMessage = async (content: string) => {
         if (done) break;
 
         const chunk = decoder.decode(value, { stream: true });
-        console.log('收到后端原始数据:', chunk); // 👈 关键：看控制台这里输出了什么！
+        
+        // ⚡️ 预处理：有些后端会把 event 和 data 粘在一起没有换行
+        // 这里的正则把 "event:xxxdata:yyy" 强行变成两行
+        // 注意：这里假设 data: 总是跟着 event: 出现的
+        const normalizedChunk = chunk
+          .replace(/event:(.*?)data:/g, 'event:$1\ndata:')
+          // 再次确保 data: 前面有换行（防止多个 data 连在一起）
+          .replace(/(?<!\n)data:/g, '\ndata:');
 
-        const lines = chunk.split('\n');
+        const lines = normalizedChunk.split('\n');
         
         for (const line of lines) {
-          // 跳过空行
           if (!line.trim()) continue; 
-
-          // --- ⚡️ 核心修改：万能解析逻辑 ⚡️ ---
           
           let contentToParse = line;
           
-          // 1. 如果有 data: 前缀，去掉它，取后面的内容
-          if (line.startsWith('data: ')) {
-            contentToParse = line.slice(6);
-          }
-          // 2. 如果是 SSE 的 event: 或 id: 字段，通常不需要显示，跳过
-          else if (line.startsWith('event: ') || line.startsWith('id: ')) {
+          // 🚨 关键修复：严格识别 SSE 字段
+          
+          // 1. 如果是 event 或 id 开头，直接跳过，不渲染！
+          if (line.startsWith('event:') || line.startsWith('id:')) {
             continue;
           }
           
-          // 3. 检查结束标记
-          if (contentToParse.trim() === '[DONE]') continue;
+          // 2. 如果是 data 开头，提取内容
+          if (line.startsWith('data:')) {
+            // 去掉前缀 'data:' (5个字符)，并去掉可能的空格
+            contentToParse = line.slice(5).trim();
+          } else {
+            // 3. 既不是 event 也不是 data，可能是之前解析剩下的垃圾，或者纯文本
+            // 如果你确定后端只会发 SSE，这里也可以 continue 掉，防止渲染脏数据
+            // contentToParse = line; 
+          }
+
+          if (contentToParse === '[DONE]') continue;
+          if (!contentToParse) continue;
 
           try {
-            // 尝试当做 JSON 解析
             const data = JSON.parse(contentToParse);
-            
-            // 只要收到有效数据，就取消 loading
             if (assistantMsg.value.isLoading) assistantMsg.value.isLoading = false;
 
             if (typeof data === 'object' && data !== null) {
-              // 处理结构化数据
               if (data.message) assistantMsg.value.content += data.message;
-              else if (data.content) assistantMsg.value.content += data.content; // 兼容不同字段
+              else if (data.content) assistantMsg.value.content += data.content;
               else if (data.location) {
                  assistantMsg.value.type = 'location';
                  assistantMsg.value.location = data.location;
@@ -151,23 +146,22 @@ const sendMessage = async (content: string) => {
                  assistantMsg.value.type = 'product';
                  assistantMsg.value.products = data.products;
               }
-              else if (data.conversationId) currentConversationId.value = data.conversationId;
+              else if (data.conversationId) {
+                currentConversationId.value = data.conversationId;
+              }
             } else {
-              // 比如解析出来是纯数字或普通字符串
+              // 兼容纯数字/字符串
               assistantMsg.value.content += String(data);
             }
           } catch (e) {
-            // ⚡️ 解析 JSON 失败，说明是纯文本
-            // 不管带不带 data:，只要 JSON 解析挂了，我们就直接显示文本
+            // JSON 解析失败，说明是纯文本
             if (assistantMsg.value.isLoading) assistantMsg.value.isLoading = false;
-            
-            // 这里的 contentToParse 可能是 "你好" 也可能是 "data: 你好" 处理后的结果
             assistantMsg.value.content += contentToParse;
           }
         }
       }
     } catch (error) {
-      console.error('发送流程中断:', error);
+      console.error('发送中断:', error);
       assistantMsg.value.content += '\n[连接中断]';
     } finally {
       isStreaming.value = false;

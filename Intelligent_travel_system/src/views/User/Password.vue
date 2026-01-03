@@ -32,9 +32,9 @@
             ]"
           />
           <van-field
-            v-model="form.checkPassword"
+            v-model="form.confirmPassword"
             type="password"
-            name="checkPassword"
+            name="confirmPassword"
             label="确认密码"
             placeholder="请再次输入新密码"
             :rules="[
@@ -78,7 +78,7 @@ const loading = ref(false);
 const form = reactive({
   oldPassword: '',
   newPassword: '',
-  checkPassword: ''
+  confirmPassword: ''
 });
 
 const onClickLeft = () => {
@@ -101,7 +101,7 @@ const onSubmit = async () => {
     const success = await userStore.updatePassword({
       oldPassword: form.oldPassword,
       newPassword: form.newPassword,
-      checkPassword: form.checkPassword
+      confirmPassword: form.confirmPassword
     });
     // 成功会自动跳转，失败则取消 loading
     if (!success) {
