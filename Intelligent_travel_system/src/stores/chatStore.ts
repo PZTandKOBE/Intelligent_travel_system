@@ -9,23 +9,39 @@ export const useChatStore = defineStore('chat', () => {
   const isStreaming = ref(false);
   const currentConversationId = ref<number | null>(null);
   const conversationList = ref<ConversationItem[]>([]);
+  
+  // 当前天气状态
+  const currentWeather = ref<string>('');
+  
+  // ✅ 新增：存储用户经纬度
+  const userLocation = ref<{ lat: number; lng: number } | null>(null);
 
   const addMessage = (msg: ChatMessage) => {
     messages.value.push(msg);
   };
 
-  // 1. 初始化会话
+  // 1. 初始化会话 (同时保存经纬度)
   const initChat = async (lat: number, lng: number) => {
     messages.value = [];
     currentConversationId.value = null; 
+    currentWeather.value = '';
+    
+    // ✅ 保存位置，供后续 sendMessage 使用
+    userLocation.value = { lat, lng };
+
     try {
       const data = await http.post<ChatInitResponse>('/chat/init', { lat, lng });
       currentConversationId.value = data.conversationId;
+      
+      if (data.envContext && data.envContext.weather) {
+        currentWeather.value = data.envContext.weather;
+      }
+
       addMessage({
         id: 'init-welcome',
         role: 'assistant',
         content: `${data.welcomeMessage}\n\n当前天气：${data.envContext.weather} ${data.envContext.temperature}℃`,
-        type: 'text', // 初始欢迎语通常是文本
+        type: 'text',
         createdAt: Date.now(),
       });
     } catch (e) {
@@ -40,11 +56,10 @@ export const useChatStore = defineStore('chat', () => {
     }
   };
 
-  // 2. 发送消息 (核心修复: URL)
+  // 2. 发送消息 (自动携带经纬度)
   const sendMessage = async (content: string) => {
     if (!content.trim() || isStreaming.value) return;
 
-    // 用户消息上屏
     addMessage({
       id: Date.now().toString(),
       role: 'user',
@@ -53,44 +68,54 @@ export const useChatStore = defineStore('chat', () => {
       createdAt: Date.now(),
     });
 
-    // AI 消息预占位
     const aiMsgId = (Date.now() + 1).toString();
     const aiMsg = ref<ChatMessage>({
       id: aiMsgId,
       role: 'assistant',
       content: '',
       type: 'text',
-      isLoading: true,
+      isLoading: true, // 开启 Loading
       createdAt: Date.now(),
     });
     messages.value.push(aiMsg.value);
     isStreaming.value = true;
 
+    // ✅ 构建请求体：带上 lat/lng
     const body: any = { message: content };
     if (currentConversationId.value) {
       body.conversationId = currentConversationId.value;
     }
+    // 如果有位置信息，带上它！
+    if (userLocation.value) {
+      body.lat = userLocation.value.lat;
+      body.lng = userLocation.value.lng;
+    }
 
-    // ✅ 修复：必须加上 /api 前缀，否则 fetch 不会走 vite proxy
     await fetchStream(
       '/api/chat/send', 
       body,
       {
         onMessage: (type, data) => {
-          if (aiMsg.value.isLoading) aiMsg.value.isLoading = false;
+          // 收到会话ID，不关 Loading
+          if (type === 'conversationId') {
+            currentConversationId.value = Number(data);
+            return; 
+          }
+
+          // 收到实质内容，关闭 Loading
+          if (aiMsg.value.isLoading) {
+             aiMsg.value.isLoading = false; 
+          }
 
           switch (type) {
             case 'message':
               if (typeof data === 'string') aiMsg.value.content += data;
               break;
-            case 'conversationId':
-              currentConversationId.value = Number(data);
-              break;
-            case 'location': // 处理地点推荐
+            case 'location': 
               aiMsg.value.type = 'location';
               aiMsg.value.location = typeof data === 'string' ? JSON.parse(data) : data;
               break;
-            case 'product': // 处理商品推荐
+            case 'product': 
               aiMsg.value.type = 'product';
               aiMsg.value.products = typeof data === 'string' ? JSON.parse(data) : data;
               break;
@@ -101,11 +126,13 @@ export const useChatStore = defineStore('chat', () => {
         },
         onDone: () => {
           isStreaming.value = false;
+          if (aiMsg.value.isLoading) aiMsg.value.isLoading = false;
         },
         onError: (err) => {
           console.error('SSE Error:', err);
           aiMsg.value.content += '\n[网络连接异常]';
           isStreaming.value = false;
+          if (aiMsg.value.isLoading) aiMsg.value.isLoading = false;
         },
       }
     );
@@ -121,22 +148,21 @@ export const useChatStore = defineStore('chat', () => {
     }
   };
 
-  // 4. 加载历史 (核心修复: 确保字段完整)
+  // 4. 加载历史
   const loadHistory = async (id: string) => {
     messages.value = [];
     currentConversationId.value = Number(id);
+    currentWeather.value = ''; 
 
     try {
       const res = await http.get<ChatMessage[]>(`/chat/history/${id}`);
       if (Array.isArray(res)) {
-        // ✅ 强制映射，防止字段丢失
         messages.value = res.map(msg => ({
           id: msg.id,
           role: msg.role,
           content: msg.content,
-          // 如果后端历史接口没返回 type，尝试根据 content 内容特征回退，或者默认为 text
           type: msg.type || 'text',
-          location: msg.location, // 确保后端返回了这些字段
+          location: msg.location,
           products: msg.products,
           createdAt: msg.createdAt,
           isLoading: false
@@ -159,6 +185,8 @@ export const useChatStore = defineStore('chat', () => {
     isStreaming,
     currentConversationId,
     conversationList,
+    currentWeather, 
+    userLocation, // 导出状态供调试
     initChat,
     sendMessage,
     fetchConversations,

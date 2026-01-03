@@ -34,7 +34,7 @@
 
         <button 
           v-if="userStore.userInfo"
-          @click="showEditDialog = true"
+          @click="openEditDialog"
           class="bg-white/20 hover:bg-white/30 p-2 rounded-full transition-colors backdrop-blur-md"
         >
           <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -47,7 +47,7 @@
     <div class="px-4 -mt-6 relative z-20">
       <div class="bg-white rounded-xl shadow-sm overflow-hidden mb-4">
         <van-cell title="我的游览报告" is-link to="/user/documents" icon="orders-o" size="large" />
-        <van-cell title="历史会话" is-link to="/chat" icon="chat-o" size="large" />
+        <van-cell title="历史会话" is-link to="/chat/history" icon="chat-o" size="large" />
         <van-cell title="修改密码" is-link @click="showToast('暂未开放')" icon="lock" size="large" />
         <van-cell title="关于我们" is-link icon="info-o" size="large" />
       </div>
@@ -61,7 +61,6 @@
       v-model:show="showEditDialog" 
       title="编辑资料" 
       show-cancel-button
-      @confirm="handleUpdateProfile"
       :before-close="onBeforeClose"
     >
       <div class="p-6 flex flex-col items-center space-y-6">
@@ -92,7 +91,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref, reactive, watch } from 'vue';
+import { onMounted, ref, reactive } from 'vue';
 import { useRouter } from 'vue-router';
 import { useUserStore } from '../../stores/userStore';
 import { showToast, showDialog } from 'vant';
@@ -107,79 +106,49 @@ const editForm = reactive({
   userAvatar: ''
 });
 
-// ✅ 1. 返回按钮逻辑
 const onClickLeft = () => {
-  router.back();
+  router.push('/'); // 返回首页
 };
 
-// 2. 初始化数据
 onMounted(() => {
   if (!userStore.userInfo) {
     userStore.fetchUserInfo();
-  } else {
-    syncEditForm();
   }
 });
 
-// 监听 userInfo 变化，同步到编辑表单
-watch(() => userStore.userInfo, (newVal) => {
-  if (newVal) {
-    syncEditForm();
-  }
-}, { immediate: true });
-
-function syncEditForm() {
+const openEditDialog = () => {
   if (userStore.userInfo) {
     editForm.userName = userStore.userInfo.userName;
     editForm.userAvatar = userStore.userInfo.userAvatar || '';
-  }
-}
-
-// ✅ 3. 头像上传逻辑
-const onAvatarUpload = async (file: any) => {
-  showToast({ message: '上传中...', type: 'loading' });
-  // 调用 Store 的上传方法
-  const url = await userStore.uploadFile(file.file);
-  
-  if (url) {
-    // 假设后端返回的是相对路径，如果需要可以拼完整 URL，这里暂时直接用
-    // 如果图片不显示，可能需要拼 http://后端IP:端口 + url
-    editForm.userAvatar = url; 
-    showToast('上传成功，记得点击确定保存哦');
-  }
-};
-
-// ✅ 4. 保存修改
-const handleUpdateProfile = async () => {
-  if (!editForm.userName.trim()) {
-    showToast('昵称不能为空');
-    return false;
-  }
-  
-  // 1. 调用更新接口
-  const success = await userStore.updateProfile(editForm.userName, editForm.userAvatar);
-  
-  if (success) {
-    // 2. 成功后，手动强制修改 store 中的数据，确保 UI 立即刷新
-    if (userStore.userInfo) {
-        userStore.userInfo.userName = editForm.userName;
-        if (editForm.userAvatar) {
-            userStore.userInfo.userAvatar = editForm.userAvatar;
-        }
-    }
-    showEditDialog.value = false; // 关闭弹窗
-  } else {
-    // 失败保持弹窗打开
     showEditDialog.value = true;
   }
 };
 
-const onBeforeClose = (action: string) => {
-  if (action === 'confirm') {
-    // 允许异步关闭，逻辑在 handleUpdateProfile 处理
-    return true; 
+const onAvatarUpload = async (file: any) => {
+  showToast({ message: '上传中...', type: 'loading' });
+  const url = await userStore.uploadFile(file.file);
+  if (url) {
+    editForm.userAvatar = url;
+    showToast('上传成功');
   }
-  return true;
+};
+
+// ✅ 修复：处理弹窗关闭逻辑
+const onBeforeClose = async (action: string) => {
+  if (action === 'confirm') {
+    if (!editForm.userName.trim()) {
+      showToast('昵称不能为空');
+      return false; // 阻止关闭
+    }
+    
+    const success = await userStore.updateProfile(editForm.userName, editForm.userAvatar);
+    if (success) {
+      return true; // 关闭弹窗
+    } else {
+      return false; // 保持打开
+    }
+  }
+  return true; // 取消时直接关闭
 };
 
 const handleLogout = () => {
@@ -189,7 +158,6 @@ const handleLogout = () => {
     showCancelButton: true,
   }).then(() => {
     userStore.logout();
-    router.push('/login');
   }).catch(() => {});
 };
 </script>
@@ -199,7 +167,7 @@ const handleLogout = () => {
   background-color: transparent;
 }
 :deep(.van-nav-bar .van-icon) {
-  color: #4f46e5; /* Indigo-600 */
+  color: #4f46e5;
 }
 :deep(.van-nav-bar__text) {
   color: #4f46e5;

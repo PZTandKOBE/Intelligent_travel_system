@@ -1,3 +1,5 @@
+// src/types/api.d.ts
+
 // 通用响应结构
 export interface ApiResponse<T = any> {
   code: number;
@@ -8,7 +10,7 @@ export interface ApiResponse<T = any> {
 // 用户信息
 export interface UserInfo {
   id: number;
-  userName: string; // 文档返回的是 userName
+  userName: string;
   userAvatar?: string;
   email: string;
 }
@@ -19,14 +21,14 @@ export interface LoginRequest {
   password: string;
 }
 
-// 注册请求参数 (已补全)
+// 注册请求参数
 export interface RegisterRequest {
   email: string;
   code: string;
-  userPassword?: string;  // 后端叫 userPassword
-  checkPassword?: string; // 后端叫 checkPassword
-  userName?: string;      // 选填
-  userAvatar?: string;    // 选填
+  userPassword?: string;
+  checkPassword?: string;
+  userName?: string;
+  userAvatar?: string;
 }
 
 // 消息类型
@@ -46,7 +48,7 @@ export interface LocationData {
 
 export interface ProductData {
   name: string;
-  shop: string; // 文档是 shop
+  shop: string;
   price?: string;
   imageUrl?: string;
   shopLat?: number;
@@ -59,13 +61,13 @@ export interface ChatMessage {
   content: string;
   type: MessageType;
   location?: LocationData;
-  products?: ProductData[]; // 文档返回的是 products 数组
+  products?: ProductData[];
   isLoading?: boolean;
-  createdAt: string | number; // 兼容后端可能返回 ISO 字符串
+  createdAt: string | number;
 }
 
 export interface ChatInitResponse {
-  conversationId: number; // 文档返回的是 number
+  conversationId: number;
   welcomeMessage: string;
   envContext: {
     city: string;
@@ -76,16 +78,17 @@ export interface ChatInitResponse {
   };
 }
 
-// 会话列表项
+// ✅ 核心修改：增加 lastMessage 字段
 export interface ConversationItem {
   id: number;
   userId: number;
   title: string;
   createdAt: string;
   updatedAt: string;
+  lastMessage?: string; // 新增这一行，解决报错
 }
 
-// 历史记录响应 (直接是数组)
+// 历史记录响应
 export type ChatHistoryResponse = ChatMessage[];
 
 // 游览报告项
@@ -93,7 +96,7 @@ export interface DocumentItem {
   id: number;
   userId: number;
   projectId: number;
-  title?: string; // 前端可能需要自己拼标题
+  title?: string;
   fileUrl: string;
   createdAt: string;
 }

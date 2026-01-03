@@ -1,6 +1,12 @@
 <template>
   <div class="min-h-screen bg-gray-50">
-    <van-nav-bar title="历史会话" left-arrow @click-left="$router.back()" fixed placeholder />
+    <van-nav-bar 
+      title="历史会话" 
+      left-arrow 
+      @click-left="goToUser" 
+      fixed 
+      placeholder 
+    />
 
     <div class="p-4 space-y-3">
       <van-empty v-if="chatStore.conversationList.length === 0" description="暂无历史会话" />
@@ -17,8 +23,12 @@
             {{ formatTime(item.updatedAt || item.createdAt) }}
           </span>
         </div>
-        <p class="text-sm text-gray-500 line-clamp-2">
-          {{ item.lastMessage || '点击查看详情...' }}
+        
+        <p class="text-sm text-gray-500 line-clamp-2" v-if="item.lastMessage">
+          {{ item.lastMessage }}
+        </p>
+        <p class="text-sm text-gray-400 line-clamp-2" v-else>
+          点击查看详情...
         </p>
       </div>
     </div>
@@ -33,20 +43,21 @@ import { useChatStore } from '../../stores/chatStore';
 const router = useRouter();
 const chatStore = useChatStore();
 
-// 格式化时间
-const formatTime = (timestamp: number) => {
+const formatTime = (timestamp: string | number) => {
   if (!timestamp) return '';
   const date = new Date(timestamp);
   return `${date.getMonth() + 1}/${date.getDate()} ${date.getHours()}:${date.getMinutes().toString().padStart(2, '0')}`;
 };
 
-// 获取列表
 onMounted(() => {
   chatStore.fetchConversations();
 });
 
-// 跳转逻辑：带上 id 参数
-const goToChat = (id: string) => {
-  router.push({ path: '/chat', query: { id } });
+const goToChat = (id: number) => {
+  router.push({ path: '/chat', query: { id: id.toString() } });
+};
+
+const goToUser = () => {
+  router.push('/user');
 };
 </script>
