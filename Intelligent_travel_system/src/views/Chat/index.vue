@@ -8,7 +8,8 @@
     </div>
     
     <div v-if="isSunny" class="weather-layer sun-container pointer-events-none">
-      <div class="sun-beams"></div> <div class="sun-glow"></div>  </div>
+      <div class="sun-beams"></div> <div class="sun-glow"></div>  
+    </div>
 
     <van-nav-bar 
       :title="title" 
@@ -80,30 +81,45 @@
       </div>
     </div>
 
-    <div class="bg-white/80 backdrop-blur-xl px-4 py-3 border-t border-gray-100/50 flex items-center gap-3 safe-area-bottom relative z-50 shadow-[0_-4px_20px_rgba(0,0,0,0.02)]">
-      <input 
-        v-model="inputContent" 
-        @keyup.enter="handleSend"
-        type="text" 
-        class="flex-1 bg-gray-100/80 rounded-full px-5 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:bg-white transition-all placeholder-gray-400"
-        placeholder="问问附近的非遗体验..." 
-        :disabled="chatStore.isStreaming"
-      />
+    <div class="bg-white/80 backdrop-blur-xl border-t border-gray-100/50 safe-area-bottom relative z-50 shadow-[0_-4px_20px_rgba(0,0,0,0.02)] flex flex-col">
       
-      <button 
-        @click="handleSend"
-        :disabled="!inputContent.trim() || chatStore.isStreaming"
-        :class="[
-          'rounded-full p-3 transition-all duration-300',
-          inputContent.trim() && !chatStore.isStreaming 
-            ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-200 scale-100 hover:bg-indigo-700' 
-            : 'bg-gray-100 text-gray-300 scale-95'
-        ]"
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 transform rotate-90" viewBox="0 0 20 20" fill="currentColor">
-          <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" />
-        </svg>
-      </button>
+      <div class="flex gap-2 px-4 pt-3 pb-1 overflow-x-auto no-scrollbar w-full">
+        <button
+          v-for="item in quickActions"
+          :key="item"
+          @click="handleQuickAction(item)"
+          :disabled="chatStore.isStreaming"
+          class="flex-shrink-0 px-3 py-1.5 bg-indigo-50 text-indigo-600 text-xs font-medium rounded-full border border-indigo-100 active:bg-indigo-100 active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+        >
+          {{ item }}
+        </button>
+      </div>
+
+      <div class="flex items-center gap-3 px-4 py-3">
+        <input 
+          v-model="inputContent" 
+          @keyup.enter="handleSend"
+          type="text" 
+          class="flex-1 bg-gray-100/80 rounded-full px-5 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:bg-white transition-all placeholder-gray-400"
+          placeholder="问问附近的非遗体验..." 
+          :disabled="chatStore.isStreaming"
+        />
+        
+        <button 
+          @click="handleSend"
+          :disabled="!inputContent.trim() || chatStore.isStreaming"
+          :class="[
+            'rounded-full p-3 transition-all duration-300 flex items-center justify-center',
+            inputContent.trim() && !chatStore.isStreaming 
+              ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-200 scale-100 hover:bg-indigo-700' 
+              : 'bg-gray-100 text-gray-300 scale-95'
+          ]"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 transform rotate-90" viewBox="0 0 20 20" fill="currentColor">
+            <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" />
+          </svg>
+        </button>
+      </div>
     </div>
   </div>
 </template>
@@ -123,6 +139,15 @@ const inputContent = ref('');
 const chatContainer = ref<HTMLElement | null>(null);
 
 const title = computed(() => route.query.id ? '历史回顾' : '非遗伴游');
+
+// ✨ 新增：定义快捷问题列表
+const quickActions = [
+  '📍 附近推荐',
+  '🎨 非遗介绍',
+  '🛍️ 文创产品',
+  '🗺️ 游览路线',
+  '🏺 历史渊源'
+];
 
 // 智能天气判断
 const isRainy = computed(() => {
@@ -187,6 +212,12 @@ const handleBack = () => {
   else router.push('/');
 };
 
+// ✨ 新增：处理快捷标签点击
+const handleQuickAction = (text: string) => {
+  if (chatStore.isStreaming) return;
+  chatStore.sendMessage(text);
+};
+
 const handleSend = () => {
   if (!inputContent.value.trim() || chatStore.isStreaming) return;
   chatStore.sendMessage(inputContent.value);
@@ -200,6 +231,15 @@ const handleSend = () => {
   padding-bottom: env(safe-area-inset-bottom);
 }
 
+/* 隐藏横向滚动条但保留滚动功能 */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
 /* 导航栏透明处理 */
 .custom-nav {
   --van-nav-bar-background: rgba(255, 255, 255, 0.6);
@@ -207,7 +247,7 @@ const handleSend = () => {
   backdrop-filter: blur(10px);
 }
 
-/* ================== 天气动画核心 CSS ================== */
+/* ================== 天气动画核心 CSS (保持不变) ================== */
 
 /* 1. 全局容器 */
 .weather-layer {
@@ -217,10 +257,10 @@ const handleSend = () => {
   width: 100%;
   height: 100%;
   z-index: 0;
-  opacity: 0.6; /* 稍微透明一点，不抢内容 */
+  opacity: 0.6; 
 }
 
-/* 2. 🌧️ 雨天效果 (背景图视差法) */
+/* 2. 🌧️ 雨天效果 */
 .rain-container {
   background: linear-gradient(to bottom, #cfd9df 0%, #e2ebf0 100%);
 }
@@ -229,14 +269,13 @@ const handleSend = () => {
   position: absolute;
   width: 100%;
   height: 100%;
-  /* 我们可以用 CSS 渐变模拟下雨，或者用 SVG 背景图。这里用 CSS repeating-linear-gradient */
   background-image: repeating-linear-gradient(
     transparent,
     transparent 50px,
     rgba(79, 70, 229, 0.3) 50px,
     rgba(79, 70, 229, 0.3) 53px
   );
-  background-size: 2px 100%; /* 细长的雨滴 */
+  background-size: 2px 100%;
   opacity: 0;
 }
 
@@ -245,10 +284,10 @@ const handleSend = () => {
   opacity: 0.6;
 }
 .layer-2 {
-  background-size: 3px 100%; /* 更粗的雨滴 */
+  background-size: 3px 100%; 
   animation: rain-fall 0.7s linear infinite;
   opacity: 0.4;
-  left: 20%; /* 错位 */
+  left: 20%; 
 }
 
 .rain-overlay {
@@ -265,9 +304,9 @@ const handleSend = () => {
   100% { transform: translateY(100vh); opacity: 0; }
 }
 
-/* 3. ☀️ 晴天效果 (光芒旋转) */
+/* 3. ☀️ 晴天效果 */
 .sun-container {
-  background: linear-gradient(to bottom, #fff7e6 0%, #ffffff 100%); /* 暖色背景 */
+  background: linear-gradient(to bottom, #fff7e6 0%, #ffffff 100%); 
 }
 
 .sun-glow {
@@ -287,7 +326,6 @@ const handleSend = () => {
   right: -200px;
   width: 600px;
   height: 600px;
-  /* 使用 conic-gradient 制作光芒 */
   background: conic-gradient(
     from 0deg,
     transparent 0deg,

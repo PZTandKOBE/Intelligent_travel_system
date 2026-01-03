@@ -26,7 +26,7 @@ export const useUserStore = defineStore('user', () => {
         email: payload.email,
         code: payload.code,
         userPassword: payload.password,
-        checkPassword: payload.password,
+        confirmPassword: payload.password,
         userName: `用户${payload.email.split('@')[0]}`,
         userAvatar: undefined 
       };
@@ -115,20 +115,19 @@ export const useUserStore = defineStore('user', () => {
   };
 
   // ✅ 核心修复：修改为 Form Data 格式提交
-  const updatePassword = async (payload: UpdatePasswordRequest) => {
+const updatePassword = async (payload: UpdatePasswordRequest) => {
     try {
-      // 构造表单数据
-      const params = new URLSearchParams();
-      params.append('oldPassword', payload.oldPassword);
-      params.append('newPassword', payload.newPassword);
-      params.append('checkPassword', payload.confirmPassword);
+      // ✅ 再次修正：尝试回退到文档标准
+      // 后端报“参数不能为空”，极大概率是因为没找到它要的 checkPassword 字段
+      const requestBody = {
+        oldPassword: payload.oldPassword,
+        newPassword: payload.newPassword,
+        checkPassword: payload.confirmPassword // ⚠️ 这里强行把前端的 confirmPassword 映射给后端的 checkPassword
+      };
 
-      // 发送请求，指定 Content-Type
-      await http.post('/user/update/password', params, {
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded'
-        }
-      });
+      console.log('正在发送修改密码请求:', requestBody); // 方便你调试看参数
+
+      await http.post('/user/update/password', requestBody);
 
       showToast('密码修改成功，请重新登录');
       
@@ -142,7 +141,6 @@ export const useUserStore = defineStore('user', () => {
       return false;
     }
   };
-
   const fetchDocuments = async () => {
     try {
       const res: any = await http.post('/document/my', { current: 1, pageSize: 20 });

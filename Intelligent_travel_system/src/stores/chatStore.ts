@@ -12,6 +12,9 @@ export const useChatStore = defineStore('chat', () => {
   const currentConversationId = ref<number | null>(null);
   const isStreaming = ref(false);
   const currentWeather = ref<string>(''); 
+  
+  // ✨ 新增：用于存储当前用户的经纬度
+  const userLocation = ref<{ lat: number; lng: number } | null>(null);
 
   // ==================== 核心功能 ====================
 
@@ -20,6 +23,11 @@ export const useChatStore = defineStore('chat', () => {
    */
   const initChat = async (lat?: number, lng?: number) => {
     try {
+      // ✨ 1. 保存位置信息到状态中，供 sendMessage 使用
+      if (lat && lng) {
+        userLocation.value = { lat, lng };
+      }
+
       // 如果没有经纬度，传空对象或者不传，视后端需求而定
       const payload = (lat && lng) ? { lat, lng } : {};
       const res = await http.post<ChatInitResponse>('/chat/init', payload);
@@ -29,6 +37,7 @@ export const useChatStore = defineStore('chat', () => {
           currentWeather.value = res.envContext.weather || '';
         }
         
+        // 只有当消息列表为空时才添加欢迎语
         if (res.welcomeMessage && messages.value.length === 0) {
           messages.value.push({
             id: 'welcome-' + Date.now(),
@@ -50,7 +59,7 @@ export const useChatStore = defineStore('chat', () => {
     }
   };
 
-const sendMessage = async (content: string) => {
+  const sendMessage = async (content: string) => {
     if (isStreaming.value || !content.trim()) return;
 
     // 1. 用户消息上屏
@@ -76,13 +85,22 @@ const sendMessage = async (content: string) => {
     isStreaming.value = true;
 
     try {
+      // ✨ 2. 构造请求体时，带上 userLocation 中的经纬度
+      const payload: any = {
+        message: content,
+        conversationId: currentConversationId.value,
+      };
+
+      // 如果有位置信息，则注入到 payload 中
+      if (userLocation.value) {
+        payload.lat = userLocation.value.lat;
+        payload.lng = userLocation.value.lng;
+      }
+
       const response = await fetch('/api/chat/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: content,
-          conversationId: currentConversationId.value,
-        })
+        body: JSON.stringify(payload) // 发送完整的 payload
       });
 
       if (!response.ok) throw new Error(`请求报错: ${response.status}`);
@@ -97,11 +115,8 @@ const sendMessage = async (content: string) => {
         const chunk = decoder.decode(value, { stream: true });
         
         // ⚡️ 预处理：有些后端会把 event 和 data 粘在一起没有换行
-        // 这里的正则把 "event:xxxdata:yyy" 强行变成两行
-        // 注意：这里假设 data: 总是跟着 event: 出现的
         const normalizedChunk = chunk
           .replace(/event:(.*?)data:/g, 'event:$1\ndata:')
-          // 再次确保 data: 前面有换行（防止多个 data 连在一起）
           .replace(/(?<!\n)data:/g, '\ndata:');
 
         const lines = normalizedChunk.split('\n');
@@ -111,21 +126,13 @@ const sendMessage = async (content: string) => {
           
           let contentToParse = line;
           
-          // 🚨 关键修复：严格识别 SSE 字段
-          
-          // 1. 如果是 event 或 id 开头，直接跳过，不渲染！
+          // 🚨 SSE 字段解析逻辑
           if (line.startsWith('event:') || line.startsWith('id:')) {
             continue;
           }
           
-          // 2. 如果是 data 开头，提取内容
           if (line.startsWith('data:')) {
-            // 去掉前缀 'data:' (5个字符)，并去掉可能的空格
             contentToParse = line.slice(5).trim();
-          } else {
-            // 3. 既不是 event 也不是 data，可能是之前解析剩下的垃圾，或者纯文本
-            // 如果你确定后端只会发 SSE，这里也可以 continue 掉，防止渲染脏数据
-            // contentToParse = line; 
           }
 
           if (contentToParse === '[DONE]') continue;
@@ -150,11 +157,9 @@ const sendMessage = async (content: string) => {
                 currentConversationId.value = data.conversationId;
               }
             } else {
-              // 兼容纯数字/字符串
               assistantMsg.value.content += String(data);
             }
           } catch (e) {
-            // JSON 解析失败，说明是纯文本
             if (assistantMsg.value.isLoading) assistantMsg.value.isLoading = false;
             assistantMsg.value.content += contentToParse;
           }
@@ -237,6 +242,7 @@ const sendMessage = async (content: string) => {
     currentConversationId,
     isStreaming,
     currentWeather,
+    userLocation,
     initChat,
     sendMessage,
     loadHistory,
