@@ -343,7 +343,7 @@ const switchConversation = async (id: number) => {
 };
 
 const startNewChat = () => {
-  chatStore.$reset(); 
+  // chatStore.$reset(); 
   chatStore.messages = [];
   chatStore.currentConversationId = null;
   

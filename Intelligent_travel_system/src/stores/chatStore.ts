@@ -4,6 +4,8 @@ import { ref } from 'vue';
 import http from '../utils/request';
 import type { ChatHistoryResponse, ConversationItem, ChatInitResponse, ChatMessage } from '../types/api';
 import { showToast } from 'vant';
+// ✨ 引入封装好的 SSE 工具
+import { fetchStream } from '../utils/sse-client';
 
 export const useChatStore = defineStore('chat', () => {
   // ==================== 状态定义 ====================
@@ -12,8 +14,6 @@ export const useChatStore = defineStore('chat', () => {
   const currentConversationId = ref<number | null>(null);
   const isStreaming = ref(false);
   const currentWeather = ref<string>(''); 
-  
-  // ✨ 新增：用于存储当前用户的经纬度
   const userLocation = ref<{ lat: number; lng: number } | null>(null);
 
   // ==================== 核心功能 ====================
@@ -23,12 +23,10 @@ export const useChatStore = defineStore('chat', () => {
    */
   const initChat = async (lat?: number, lng?: number) => {
     try {
-      // ✨ 1. 保存位置信息到状态中，供 sendMessage 使用
       if (lat && lng) {
         userLocation.value = { lat, lng };
       }
 
-      // 如果没有经纬度，传空对象或者不传，视后端需求而定
       const payload = (lat && lng) ? { lat, lng } : {};
       const res = await http.post<ChatInitResponse>('/chat/init', payload);
       
@@ -37,7 +35,6 @@ export const useChatStore = defineStore('chat', () => {
           currentWeather.value = res.envContext.weather || '';
         }
         
-        // 只有当消息列表为空时才添加欢迎语
         if (res.welcomeMessage && messages.value.length === 0) {
           messages.value.push({
             id: 'welcome-' + Date.now(),
@@ -59,7 +56,7 @@ export const useChatStore = defineStore('chat', () => {
     }
   };
 
-  const sendMessage = async (content: string) => {
+const sendMessage = async (content: string) => {
     if (isStreaming.value || !content.trim()) return;
 
     // 1. 用户消息上屏
@@ -72,6 +69,7 @@ export const useChatStore = defineStore('chat', () => {
     });
 
     // 2. AI 消息占位
+    // 默认 isLoading 为 true，这样一开始就会显示加载动画
     const assistantMsg = ref<ChatMessage>({
       id: `ai-${Date.now()}`,
       role: 'assistant',
@@ -85,90 +83,76 @@ export const useChatStore = defineStore('chat', () => {
     isStreaming.value = true;
 
     try {
-      // ✨ 2. 构造请求体时，带上 userLocation 中的经纬度
+      // 3. 构造请求体
       const payload: any = {
         message: content,
         conversationId: currentConversationId.value,
       };
 
-      // 如果有位置信息，则注入到 payload 中
       if (userLocation.value) {
         payload.lat = userLocation.value.lat;
         payload.lng = userLocation.value.lng;
       }
 
-      const response = await fetch('/api/chat/send', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload) // 发送完整的 payload
-      });
-
-      if (!response.ok) throw new Error(`请求报错: ${response.status}`);
-      const reader = response.body?.getReader();
-      const decoder = new TextDecoder();
-      if (!reader) throw new Error('无法获取流');
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        const chunk = decoder.decode(value, { stream: true });
-        
-        // ⚡️ 预处理：有些后端会把 event 和 data 粘在一起没有换行
-        const normalizedChunk = chunk
-          .replace(/event:(.*?)data:/g, 'event:$1\ndata:')
-          .replace(/(?<!\n)data:/g, '\ndata:');
-
-        const lines = normalizedChunk.split('\n');
-        
-        for (const line of lines) {
-          if (!line.trim()) continue; 
+      // 4. 使用 fetchStream 处理 SSE
+      await fetchStream('/api/chat/send', payload, {
+        onMessage: (type, data) => {
+          // ============ 核心修改：根据 type 处理状态 ============
           
-          let contentToParse = line;
-          
-          // 🚨 SSE 字段解析逻辑
-          if (line.startsWith('event:') || line.startsWith('id:')) {
-            continue;
+          if (type === 'status') {
+            // 🧠 当后端返回 thinking 时，强制开启加载状态
+            if (data === 'thinking') {
+              assistantMsg.value.isLoading = true;
+            } 
+            // 🗣️ 当后端返回 answering 时，关闭加载状态，准备出字
+            else if (data === 'answering') {
+              assistantMsg.value.isLoading = false;
+            }
           }
           
-          if (line.startsWith('data:')) {
-            contentToParse = line.slice(5).trim();
-          }
+          else if (type === 'message') {
+            // 收到消息内容时，确保关闭加载动画（双重保险）
+            if (assistantMsg.value.isLoading) {
+              assistantMsg.value.isLoading = false;
+            }
 
-          if (contentToParse === '[DONE]') continue;
-          if (!contentToParse) continue;
-
-          try {
-            const data = JSON.parse(contentToParse);
-            if (assistantMsg.value.isLoading) assistantMsg.value.isLoading = false;
-
+            // 处理 JSON 数据 (location/product) 或 纯文本
             if (typeof data === 'object' && data !== null) {
-              if (data.message) assistantMsg.value.content += data.message;
-              else if (data.content) assistantMsg.value.content += data.content;
-              else if (data.location) {
+              if (data.location) {
                  assistantMsg.value.type = 'location';
                  assistantMsg.value.location = data.location;
-              }
-              else if (data.products) {
+              } else if (data.products) {
                  assistantMsg.value.type = 'product';
                  assistantMsg.value.products = data.products;
-              }
-              else if (data.conversationId) {
-                currentConversationId.value = data.conversationId;
+              } else {
+                 // 兼容后端可能把文本放在 message 或 content 字段的情况
+                 assistantMsg.value.content += (data.message || data.content || '');
               }
             } else {
+              // 纯文本拼接
               assistantMsg.value.content += String(data);
             }
-          } catch (e) {
-            if (assistantMsg.value.isLoading) assistantMsg.value.isLoading = false;
-            assistantMsg.value.content += contentToParse;
           }
+          
+          else if (type === 'conversationId') {
+            currentConversationId.value = Number(data);
+          }
+        },
+        onDone: () => {
+          isStreaming.value = false;
+          assistantMsg.value.isLoading = false;
+        },
+        onError: (err) => {
+          console.error('发送中断:', err);
+          assistantMsg.value.content += '\n[连接中断]';
+          isStreaming.value = false;
+          assistantMsg.value.isLoading = false;
         }
-      }
+      });
+
     } catch (error) {
-      console.error('发送中断:', error);
-      assistantMsg.value.content += '\n[连接中断]';
-    } finally {
+      console.error('请求失败:', error);
+      assistantMsg.value.content = '[发送失败]';
       isStreaming.value = false;
       assistantMsg.value.isLoading = false;
     }
