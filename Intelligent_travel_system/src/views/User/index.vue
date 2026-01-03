@@ -48,7 +48,7 @@
       <div class="bg-white rounded-xl shadow-sm overflow-hidden mb-4">
         <van-cell title="我的游览报告" is-link to="/user/documents" icon="orders-o" size="large" />
         <van-cell title="历史会话" is-link to="/chat/history" icon="chat-o" size="large" />
-        <van-cell title="修改密码" is-link @click="showToast('暂未开放')" icon="lock" size="large" />
+        <van-cell title="修改密码" is-link to="/user/password" icon="lock" size="large" />
         <van-cell title="关于我们" is-link icon="info-o" size="large" />
       </div>
 
@@ -107,7 +107,7 @@ const editForm = reactive({
 });
 
 const onClickLeft = () => {
-  router.push('/'); // 返回首页
+  router.push('/');
 };
 
 onMounted(() => {
@@ -133,22 +133,21 @@ const onAvatarUpload = async (file: any) => {
   }
 };
 
-// ✅ 修复：处理弹窗关闭逻辑
 const onBeforeClose = async (action: string) => {
   if (action === 'confirm') {
     if (!editForm.userName.trim()) {
       showToast('昵称不能为空');
-      return false; // 阻止关闭
+      return false;
     }
     
     const success = await userStore.updateProfile(editForm.userName, editForm.userAvatar);
     if (success) {
-      return true; // 关闭弹窗
+      return true;
     } else {
-      return false; // 保持打开
+      return false;
     }
   }
-  return true; // 取消时直接关闭
+  return true;
 };
 
 const handleLogout = () => {

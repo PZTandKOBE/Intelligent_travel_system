@@ -2,7 +2,7 @@
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
 import http from '../utils/request';
-import type { UserInfo, LoginRequest, DocumentItem } from '../types/api';
+import type { UserInfo, LoginRequest, DocumentItem, UpdatePasswordRequest } from '../types/api';
 import { showToast } from 'vant';
 
 export const useUserStore = defineStore('user', () => {
@@ -95,13 +95,11 @@ export const useUserStore = defineStore('user', () => {
     }
   };
 
-  // ✅ 核心修复：更新逻辑
   const updateProfile = async (userName: string, userAvatar?: string) => {
     try {
       await http.post('/user/update/my', { userName, userAvatar });
       showToast('更新成功');
       
-      // ✅ 乐观更新：直接改前端数据，且不再重新拉取（防止旧数据覆盖）
       if (userInfo.value) {
         userInfo.value.userName = userName;
         if (userAvatar) {
@@ -112,6 +110,35 @@ export const useUserStore = defineStore('user', () => {
     } catch (error) {
       console.error('更新失败:', error);
       showToast('更新失败，请重试');
+      return false;
+    }
+  };
+
+  // ✅ 核心修复：修改为 Form Data 格式提交
+  const updatePassword = async (payload: UpdatePasswordRequest) => {
+    try {
+      // 构造表单数据
+      const params = new URLSearchParams();
+      params.append('oldPassword', payload.oldPassword);
+      params.append('newPassword', payload.newPassword);
+      params.append('checkPassword', payload.checkPassword);
+
+      // 发送请求，指定 Content-Type
+      await http.post('/user/update/password', params, {
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded'
+        }
+      });
+
+      showToast('密码修改成功，请重新登录');
+      
+      setTimeout(() => {
+        logout(); 
+      }, 1500);
+      
+      return true;
+    } catch (error) {
+      console.error('修改密码失败:', error);
       return false;
     }
   };
@@ -136,6 +163,7 @@ export const useUserStore = defineStore('user', () => {
     uploadFile, 
     fetchUserInfo,
     updateProfile,
-    fetchDocuments
+    fetchDocuments,
+    updatePassword
   };
 });

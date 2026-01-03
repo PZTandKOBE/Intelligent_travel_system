@@ -2,17 +2,18 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router';
 
 import Login from '../views/Login/index.vue';
-import Home from '../views/Home/index.vue'; // ✅ 引入 Home 组件
+import Home from '../views/Home/index.vue';
 import Chat from '../views/Chat/index.vue';
 import User from '../views/User/index.vue';
 import Document from '../views/User/Document.vue'; 
 import History from '../views/Chat/History.vue';
+import Password from '../views/User/Password.vue'; // ✅ 新增引入
 
 const routes: RouteRecordRaw[] = [
   {
     path: '/',
     name: 'Home',
-    component: Home, // ✅ 首页改为 Home
+    component: Home,
     meta: { title: '非遗伴游' }
   },
   {
@@ -40,10 +41,17 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '个人中心', requiresAuth: true }
   },
   {
-    path: '/user/documents', // ✅ 修正路径拼写 (原为 /user/document)
+    path: '/user/documents',
     name: 'UserDocument',
     component: Document,
     meta: { title: '游览报告', requiresAuth: true }
+  },
+  // ✅ 新增路由：修改密码
+  {
+    path: '/user/password',
+    name: 'UserPassword',
+    component: Password,
+    meta: { title: '修改密码', requiresAuth: true }
   }
 ];
 

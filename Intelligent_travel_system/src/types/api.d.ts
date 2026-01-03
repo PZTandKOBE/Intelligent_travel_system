@@ -100,3 +100,10 @@ export interface DocumentItem {
   fileUrl: string;
   createdAt: string;
 }
+
+// 修改密码请求参数
+export interface UpdatePasswordRequest {
+  oldPassword: string;
+  newPassword: string;
+  checkPassword: string;
+}
