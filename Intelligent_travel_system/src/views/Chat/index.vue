@@ -1,5 +1,9 @@
 <template>
-  <div class="flex flex-col h-screen bg-gray-50 relative overflow-hidden font-sans">
+  <div 
+    class="flex flex-col h-screen bg-gray-50 relative overflow-hidden font-sans"
+    @touchstart="handleTouchStart"
+    @touchend="handleTouchEnd"
+  >
     
     <div v-if="isRainy" class="weather-layer rain-container pointer-events-none">
       <div class="rain-layer layer-1"></div>
@@ -13,7 +17,7 @@
 
     <van-nav-bar 
       :title="title" 
-      left-arrow 
+      :left-arrow="!!route.query.id" 
       @click-left="handleBack" 
       fixed 
       placeholder 
@@ -21,6 +25,10 @@
       :border="false"
       class="custom-nav relative z-50"
     >
+      <template #left v-if="!route.query.id">
+        <van-icon name="wap-nav" size="24" class="text-gray-700" />
+      </template>
+
       <template #right>
         <div @click="router.push('/user')" class="flex items-center justify-center w-9 h-9 bg-white/50 backdrop-blur-md rounded-full cursor-pointer hover:bg-white/80 transition-all shadow-sm active:scale-95">
           <span class="text-base">👤</span>
@@ -81,6 +89,49 @@
       </div>
     </div>
 
+    <van-popup 
+      v-model:show="showHistory" 
+      position="right" 
+      :style="{ width: '75%', height: '100%' }"
+      class="bg-gray-50"
+    >
+      <div class="flex flex-col h-full">
+        <div class="p-4 bg-white shadow-sm border-b flex justify-between items-center">
+          <h2 class="text-lg font-bold text-gray-800">历史会话</h2>
+          <van-icon name="cross" @click="showHistory = false" class="text-gray-500" />
+        </div>
+        
+        <div class="flex-1 overflow-y-auto p-2">
+          <van-empty v-if="!chatStore.historyList?.length" description="暂无历史记录" />
+          
+          <div 
+            v-for="item in chatStore.historyList" 
+            :key="item.id"
+            @click="switchConversation(item.id)"
+            :class="[
+              'p-3 mb-3 rounded-xl border transition-all cursor-pointer active:scale-95',
+              currentConversationId === item.id 
+                ? 'bg-indigo-50 border-indigo-200 shadow-inner' 
+                : 'bg-white border-gray-100 shadow-sm hover:shadow-md'
+            ]"
+          >
+            <div class="font-medium text-gray-800 line-clamp-1 mb-1">{{ item.title || '新会话' }}</div>
+            <div class="text-xs text-gray-400 flex justify-between">
+              <span>{{ formatTime(item.updatedAt || item.createdAt) }}</span>
+              <span v-if="currentConversationId === item.id" class="text-indigo-500">当前</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="p-4 border-t bg-white">
+           <van-button block type="primary" plain size="small" @click="startNewChat">
+             <template #icon><van-icon name="plus" /></template>
+             开启新会话
+           </van-button>
+        </div>
+      </div>
+    </van-popup>
+
     <div class="bg-white/80 backdrop-blur-xl border-t border-gray-100/50 safe-area-bottom relative z-50 shadow-[0_-4px_20px_rgba(0,0,0,0.02)] flex flex-col">
       
       <div class="flex gap-2 px-4 pt-3 pb-1 overflow-x-auto no-scrollbar w-full">
@@ -138,9 +189,13 @@ const chatStore = useChatStore();
 const inputContent = ref('');
 const chatContainer = ref<HTMLElement | null>(null);
 
+// 历史会话侧边栏控制
+const showHistory = ref(false);
+const currentConversationId = computed(() => chatStore.currentConversationId);
+
 const title = computed(() => route.query.id ? '历史回顾' : '非遗伴游');
 
-// ✨ 新增：定义快捷问题列表
+// 定义快捷问题列表
 const quickActions = [
   '📍 附近推荐',
   '🎨 非遗介绍',
@@ -160,9 +215,15 @@ const isSunny = computed(() => {
   return /晴|Sunny|Clear/i.test(w);
 });
 
+// 格式化时间
 const formatTime = (time: string | number) => {
   const date = new Date(time);
-  return isNaN(date.getTime()) ? '' : date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const isToday = new Date().toDateString() === date.toDateString();
+  return isNaN(date.getTime()) 
+    ? '' 
+    : isToday 
+      ? date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      : `${date.getMonth() + 1}/${date.getDate()} ${date.getHours()}:${date.getMinutes().toString().padStart(2, '0')}`;
 };
 
 const scrollToBottom = () => {
@@ -176,6 +237,13 @@ const scrollToBottom = () => {
 watch(() => chatStore.messages.length, scrollToBottom);
 watch(() => chatStore.messages[chatStore.messages.length - 1], () => scrollToBottom(), { deep: true });
 
+// 监听侧边栏打开，获取历史记录
+watch(showHistory, (newVal) => {
+  if (newVal) {
+    chatStore.fetchHistory();
+  }
+});
+
 const initOrLoad = async () => {
   const historyId = route.query.id as string;
   if (historyId) {
@@ -186,7 +254,7 @@ const initOrLoad = async () => {
         navigator.geolocation.getCurrentPosition(
           (pos) => chatStore.initChat(pos.coords.latitude, pos.coords.longitude),
           () => {
-             showToast('定位未开启，默认广州');
+             // 默认广州
              chatStore.initChat(23.1291, 113.2644);
           },
           { timeout: 5000 }
@@ -207,12 +275,18 @@ onMounted(() => {
   initOrLoad();
 });
 
+// ⭐ 修复后的 handleBack 逻辑 ⭐
 const handleBack = () => {
-  if (route.query.id) router.back();
-  else router.push('/');
+  if (route.query.id) {
+    // 只有在查看历史记录时，才执行返回
+    router.back();
+  } else {
+    // 在主会话界面，点击左上角直接打开侧边栏
+    showHistory.value = true;
+  }
 };
 
-// ✨ 新增：处理快捷标签点击
+// 处理快捷标签点击
 const handleQuickAction = (text: string) => {
   if (chatStore.isStreaming) return;
   chatStore.sendMessage(text);
@@ -222,6 +296,63 @@ const handleSend = () => {
   if (!inputContent.value.trim() || chatStore.isStreaming) return;
   chatStore.sendMessage(inputContent.value);
   inputContent.value = '';
+};
+
+// ================== 手势滑动逻辑 ==================
+const touchStart = ref({ x: 0, y: 0 });
+const minSwipeDistance = 50; // 最小滑动距离
+
+const handleTouchStart = (e: TouchEvent) => {
+  touchStart.value = {
+    x: e.touches[0].clientX,
+    y: e.touches[0].clientY
+  };
+};
+
+const handleTouchEnd = (e: TouchEvent) => {
+  const touchEnd = {
+    x: e.changedTouches[0].clientX,
+    y: e.changedTouches[0].clientY
+  };
+
+  const deltaX = touchEnd.x - touchStart.value.x;
+  const deltaY = touchEnd.y - touchStart.value.y;
+
+  // 检测水平滑动：X轴距离足够，且Y轴偏移较小（防止斜滑触发）
+  if (Math.abs(deltaX) > minSwipeDistance && Math.abs(deltaY) < 50) {
+    if (deltaX < 0) {
+      // 向左滑动 (Right -> Left): 打开右侧侧边栏
+      showHistory.value = true;
+    } 
+  }
+};
+
+// ================== 历史记录操作 ==================
+const switchConversation = async (id: number) => {
+  if (currentConversationId.value === id) {
+    showHistory.value = false;
+    return;
+  }
+  
+  await chatStore.loadHistory(id);
+  showHistory.value = false;
+  
+  if (route.query.id) {
+    router.replace({ query: { ...route.query, id: id } });
+  }
+};
+
+const startNewChat = () => {
+  chatStore.$reset(); 
+  chatStore.messages = [];
+  chatStore.currentConversationId = null;
+  
+  initOrLoad();
+  
+  showHistory.value = false;
+  if (route.query.id) {
+    router.push('/chat');
+  }
 };
 </script>
 
@@ -247,7 +378,7 @@ const handleSend = () => {
   backdrop-filter: blur(10px);
 }
 
-/* ================== 天气动画核心 CSS (保持不变) ================== */
+/* ================== 天气动画核心 CSS ================== */
 
 /* 1. 全局容器 */
 .weather-layer {
