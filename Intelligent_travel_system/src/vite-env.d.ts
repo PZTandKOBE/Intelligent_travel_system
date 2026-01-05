@@ -6,3 +6,5 @@ declare module '*.vue' {
   const component: DefineComponent<{}, {}, any>
   export default component
 }
+
+declare module 'vanta/dist/vanta.waves.min';

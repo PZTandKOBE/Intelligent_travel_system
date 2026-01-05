@@ -49,7 +49,6 @@
         <van-cell title="我的游览报告" is-link to="/user/documents" icon="orders-o" size="large" />
         <van-cell title="历史会话" is-link to="/chat/history" icon="chat-o" size="large" />
         <van-cell title="修改密码" is-link to="/user/password" icon="lock" size="large" />
-        <van-cell title="关于我们" is-link icon="info-o" size="large" />
       </div>
 
       <div class="bg-white rounded-xl shadow-sm overflow-hidden" v-if="userStore.userInfo">

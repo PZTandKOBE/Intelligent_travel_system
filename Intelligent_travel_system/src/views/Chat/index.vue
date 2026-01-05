@@ -4,7 +4,6 @@
     @touchstart="handleTouchStart"
     @touchend="handleTouchEnd"
   >
-    
     <div class="absolute inset-0 pointer-events-none z-0 overflow-hidden">
       <div v-if="isRainy" class="weather-layer rain-container">
         <div class="rain-layer layer-1"></div>
@@ -44,7 +43,6 @@
       <template #left v-if="!route.query.id">
         <van-icon name="wap-nav" size="24" class="text-gray-700" />
       </template>
-
       <template #right>
         <div @click="router.push('/user')" class="flex items-center justify-center w-9 h-9 bg-white/50 backdrop-blur-md rounded-full cursor-pointer hover:bg-white/80 transition-all shadow-sm active:scale-95">
           <span class="text-base">👤</span>
@@ -54,11 +52,9 @@
 
     <div class="flex-1 overflow-y-auto p-4 space-y-6 relative z-10" ref="chatContainer">
       <div v-for="msg in chatStore.messages" :key="msg.id" class="flex flex-col">
-        
         <div class="text-center text-xs text-gray-400/80 mb-3 scale-90">
           {{ formatTime(msg.createdAt) }}
         </div>
-
         <div :class="['flex', msg.role === 'user' ? 'justify-end' : 'justify-start']">
           
           <div v-if="msg.role === 'assistant'" class="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center mr-3 flex-shrink-0 border-2 border-white shadow-sm overflow-hidden">
@@ -66,7 +62,6 @@
           </div>
 
           <div class="flex flex-col max-w-[85%]">
-            
             <div 
               :class="[
                 'px-4 py-3 rounded-2xl text-[15px] leading-relaxed shadow-sm break-words transition-all',
@@ -97,13 +92,11 @@
                 class="mt-3 shadow-md"
               />
             </template>
-            
             <LocationCard 
               v-else-if="msg.type === 'location' && msg.location" 
               :data="msg.location"
               class="mt-3 shadow-md"
             />
-            
             <template v-if="msg.type === 'product' && msg.products">
               <ProductCard 
                 v-for="(prod, idx) in msg.products" 
@@ -173,7 +166,6 @@
           {{ item }}
         </button>
       </div>
-
       <div class="flex items-center gap-3 px-4 py-3">
         <input 
           v-model="inputContent" 
@@ -215,12 +207,10 @@ const chatStore = useChatStore();
 const inputContent = ref('');
 const chatContainer = ref<HTMLElement | null>(null);
 
-// 历史会话侧边栏
 const showHistory = ref(false);
 const currentConversationId = computed(() => chatStore.currentConversationId);
 const title = computed(() => route.query.id ? '历史回顾' : '非遗伴游');
 
-// 快捷操作
 const quickActions = [
   '📍 附近推荐',
   '🎨 非遗介绍',
@@ -229,7 +219,6 @@ const quickActions = [
   '🏺 历史渊源'
 ];
 
-// 天气逻辑
 const w = computed(() => (chatStore.currentWeather || '').toLowerCase());
 const isRainy = computed(() => /雨|rain|shower|drizzle|storm/i.test(w.value));
 const isSunny = computed(() => /晴|sunny|clear/i.test(w.value));
@@ -237,18 +226,33 @@ const isCloudy = computed(() => /云|阴|cloud|overcast/i.test(w.value));
 const isSnowy = computed(() => /雪|snow|blizzard/i.test(w.value));
 const isFoggy = computed(() => /雾|fog|mist|haze/i.test(w.value));
 
-// ✅ 核心修复：解析 Markdown 图片语法
+// ✅ 核心修复：兼容三种图片格式的渲染
 const renderMessage = (content: string) => {
   if (!content) return '';
-  // 将 ![alt](url) 替换为 <img ...>
-  // 使用正则非贪婪匹配
-  return content.replace(
+  
+  let html = content;
+
+  // 1. Markdown 格式: ![alt](url)
+  html = html.replace(
     /!\[(.*?)\]\((.*?)\)/g, 
     '<img src="$2" alt="$1" class="chat-image rounded-xl my-2 max-w-full h-auto shadow-sm border border-gray-100" loading="lazy" />'
   );
+
+  // 2. 旧文本格式: 地图图片：url
+  html = html.replace(
+    /地图图片：(https?:\/\/[^\s\n<]+)/g, // 排除已经替换成的 <img src...>
+    '<img src="$1" alt="地图图片" class="chat-image rounded-xl my-2 max-w-full h-auto shadow-sm border border-gray-100" loading="lazy" />'
+  );
+
+  // 3. ✅ 新增全角括号格式: （图片：url）
+  html = html.replace(
+    /（图片：(https?:\/\/[^\s\n）<]+)）/g,
+    '<img src="$1" alt="推荐图片" class="chat-image rounded-xl my-2 max-w-full h-auto shadow-sm border border-gray-100" loading="lazy" />'
+  );
+
+  return html;
 };
 
-// 格式化时间
 const formatTime = (time: string | number) => {
   const date = new Date(time);
   const isToday = new Date().toDateString() === date.toDateString();
@@ -271,9 +275,7 @@ watch(() => chatStore.messages.length, scrollToBottom);
 watch(() => chatStore.messages[chatStore.messages.length - 1], () => scrollToBottom(), { deep: true });
 
 watch(showHistory, (newVal) => {
-  if (newVal) {
-    chatStore.fetchHistory();
-  }
+  if (newVal) chatStore.fetchHistory();
 });
 
 const initOrLoad = async () => {
@@ -282,9 +284,7 @@ const initOrLoad = async () => {
     await chatStore.loadHistory(historyId);
   } else {
     if (chatStore.messages.length === 0 || chatStore.currentConversationId !== null) {
-      // 默认先用 store 里的，如果有缓存
       if (chatStore.messages.length === 0) {
-        // 尝试获取位置并初始化，chatStore 内部有默认兜底
         if (navigator.geolocation) {
            navigator.geolocation.getCurrentPosition(
              (pos) => chatStore.initChat(pos.coords.latitude, pos.coords.longitude),
@@ -300,20 +300,12 @@ const initOrLoad = async () => {
   scrollToBottom();
 };
 
-watch(() => route.query.id, () => {
-  initOrLoad();
-});
-
-onMounted(() => {
-  initOrLoad();
-});
+watch(() => route.query.id, () => { initOrLoad(); });
+onMounted(() => { initOrLoad(); });
 
 const handleBack = () => {
-  if (route.query.id) {
-    router.back();
-  } else {
-    showHistory.value = true;
-  }
+  if (route.query.id) router.back();
+  else showHistory.value = true;
 };
 
 const handleQuickAction = (text: string) => {
@@ -327,7 +319,6 @@ const handleSend = () => {
   inputContent.value = '';
 };
 
-// 手势
 const touchStart = ref({ x: 0, y: 0 });
 const minSwipeDistance = 50; 
 const handleTouchStart = (e: TouchEvent) => {
@@ -349,9 +340,7 @@ const switchConversation = async (id: number) => {
   }
   await chatStore.loadHistory(id);
   showHistory.value = false;
-  if (route.query.id) {
-    router.replace({ query: { ...route.query, id: id } });
-  }
+  if (route.query.id) router.replace({ query: { ...route.query, id: id } });
 };
 
 const startNewChat = () => {
@@ -359,9 +348,7 @@ const startNewChat = () => {
   chatStore.currentConversationId = null;
   initOrLoad();
   showHistory.value = false;
-  if (route.query.id) {
-    router.push('/chat');
-  }
+  if (route.query.id) router.push('/chat');
 };
 </script>
 
@@ -371,8 +358,14 @@ const startNewChat = () => {
   padding-bottom: env(safe-area-inset-bottom);
 }
 
-.no-scrollbar::-webkit-scrollbar { display: none; }
-.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
 
 .custom-nav {
   --van-nav-bar-background: rgba(255, 255, 255, 0.6);
@@ -388,7 +381,6 @@ const startNewChat = () => {
   margin: 8px 0;
 }
 
-/* 动画和天气样式保持不变 */
 .typing-dot {
   width: 6px;
   height: 6px;

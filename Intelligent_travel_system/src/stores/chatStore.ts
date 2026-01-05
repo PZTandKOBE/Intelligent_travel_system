@@ -2,9 +2,11 @@
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
 import http from '../utils/request';
+import { showToast } from 'vant'; // ✅ 记得引入 showToast
 import { SSEClient, type SSECallback } from '../utils/sse-client';
 import type { ChatMessage, ChatHistoryItem, LocationData } from '../types/api';
 
+// 扩展 Message 类型以支持前端状态
 interface ExtendedMessage extends ChatMessage {
   isLoading?: boolean;
   isThinking?: boolean;
@@ -12,6 +14,7 @@ interface ExtendedMessage extends ChatMessage {
 }
 
 export const useChatStore = defineStore('chat', () => {
+  // ==================== 状态定义 ====================
   const messages = ref<ExtendedMessage[]>([]);
   const historyList = ref<ChatHistoryItem[]>([]);
   const currentConversationId = ref<number | null>(null);
@@ -20,21 +23,21 @@ export const useChatStore = defineStore('chat', () => {
 
   const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
 
-  // ✅ 核心修复：升级解析逻辑
-  // 1. 支持 Markdown 图片 ![name](url)
-  // 2. 从百度地图 URL 参数中提取经纬度
+  // ==================== 辅助函数 ====================
+
+  // 增强正则解析，兼容三种图片格式
   const extractLocationsFromText = (text: string): LocationData[] => {
     const locations: LocationData[] = [];
     
-    // 匹配 Markdown 图片语法: ![alt](url)
-    // 同时也兼容之前的 "地图图片：url" 格式（为了稳健）
+    // 1. Markdown 格式: ![alt](url)
     const markdownImgRegex = /!\[(.*?)\]\((https?:\/\/[^\)]+)\)/g;
+    // 2. 旧文本格式: 地图图片：url
     const legacyImgRegex = /地图图片：(https?:\/\/[^\s\n]+)/g;
+    // 3. 全角括号格式: （图片：url）
+    const parenthesesImgRegex = /（图片：(https?:\/\/[^\s\n）]+)）/g;
 
-    // 辅助函数：解析 URL 中的坐标
+    // 从百度静态图 URL 中解析 lat/lng
     const parseCoordsFromUrl = (url: string) => {
-      // 百度静态图 URL 通常包含 markers=lng,lat 或 center=lng,lat
-      // 例如: markers=113.252922,23.132124
       const match = url.match(/(?:markers|center)=([\d\.]+),([\d\.]+)/);
       if (match) {
         return { lng: parseFloat(match[1]), lat: parseFloat(match[2]) };
@@ -42,41 +45,43 @@ export const useChatStore = defineStore('chat', () => {
       return { lng: 0, lat: 0 };
     };
 
-    // 1. 处理 Markdown 图片
-    let match;
-    while ((match = markdownImgRegex.exec(text)) !== null) {
-      const [_, alt, url] = match;
+    const processMatch = (name: string, url: string) => {
+      if (locations.find(l => l.mapImageUrl === url)) return;
       const { lng, lat } = parseCoordsFromUrl(url);
-      
       locations.push({
-        name: alt || '推荐地点',
-        address: '点击卡片查看详情', // 暂时无法精确关联上下文的地址文本，用通用文案
+        name: name || '推荐地点',
+        address: '点击卡片查看详情',
         lat,
         lng,
         mapImageUrl: url,
         images: [url]
       });
-    }
+    };
 
-    // 2. 处理旧格式（如果混合存在）
-    while ((match = legacyImgRegex.exec(text)) !== null) {
-      const [_, url] = match;
-      // 避免重复添加
-      if (!locations.find(l => l.mapImageUrl === url)) {
-        const { lng, lat } = parseCoordsFromUrl(url);
-        locations.push({
-          name: '推荐地点',
-          address: '点击查看详情',
-          lat,
-          lng,
-          mapImageUrl: url,
-          images: [url]
-        });
-      }
-    }
+    let match;
+    while ((match = markdownImgRegex.exec(text)) !== null) processMatch(match[1], match[2]);
+    while ((match = legacyImgRegex.exec(text)) !== null) processMatch('推荐地点', match[1]);
+    while ((match = parenthesesImgRegex.exec(text)) !== null) processMatch('推荐地点', match[1]);
 
     return locations;
   };
+
+  // Promise 封装定位
+  const getGeoLocation = (): Promise<{lat: number, lng: number}> => {
+    return new Promise((resolve) => {
+      if (!navigator.geolocation) {
+        resolve({ lat: 23.1291, lng: 113.2644 });
+        return;
+      }
+      navigator.geolocation.getCurrentPosition(
+        (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+        (err) => resolve({ lat: 23.1291, lng: 113.2644 }),
+        { timeout: 5000, enableHighAccuracy: true }
+      );
+    });
+  };
+
+  // ==================== 核心功能 Action ====================
 
   const initChat = async (lat: number, lng: number) => {
     try {
@@ -88,40 +93,20 @@ export const useChatStore = defineStore('chat', () => {
         if (data.envContext) {
           currentWeather.value = data.envContext.weather;
         }
-        messages.value = [{
-          id: Date.now().toString(),
-          role: 'assistant',
-          content: data.welcomeMessage,
-          createdAt: new Date().toISOString(),
-          type: 'text'
-        }];
+        // 如果当前没有消息，显示欢迎语
+        if (messages.value.length === 0) {
+          messages.value = [{
+            id: Date.now().toString(),
+            role: 'assistant',
+            content: data.welcomeMessage,
+            createdAt: new Date().toISOString(),
+            type: 'text'
+          }];
+        }
       }
     } catch (error) {
       console.error('初始化会话失败', error);
     }
-  };
-
-  // ✅ 核心修复：Promise 封装定位，解决异步导致坐标错误的问题
-  const getGeoLocation = (): Promise<{lat: number, lng: number}> => {
-    return new Promise((resolve) => {
-      if (!navigator.geolocation) {
-        console.warn('浏览器不支持地理定位');
-        resolve({ lat: 23.1291, lng: 113.2644 }); // 默认广州
-        return;
-      }
-
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          console.log('定位成功:', pos.coords.latitude, pos.coords.longitude);
-          resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude });
-        },
-        (err) => {
-          console.error('定位失败，使用默认坐标:', err);
-          resolve({ lat: 23.1291, lng: 113.2644 }); // 失败回退
-        },
-        { timeout: 5000, enableHighAccuracy: true }
-      );
-    });
   };
 
   const sendMessage = async (content: string) => {
@@ -147,9 +132,7 @@ export const useChatStore = defineStore('chat', () => {
     });
     messages.value.push(assistantMsg.value);
 
-    // ✅ 修复：等待定位完成后再继续
     const { lat, lng } = await getGeoLocation();
-
     const sse = new SSEClient(`${API_BASE_URL}/chat/send`);
     
     try {
@@ -160,11 +143,7 @@ export const useChatStore = defineStore('chat', () => {
         lng
       }, (event: SSECallback) => {
         if (event.event === 'status') {
-          if (event.data === 'thinking') {
-             assistantMsg.value.isThinking = true;
-          } else if (event.data === 'answering') {
-             assistantMsg.value.isThinking = false;
-          }
+          assistantMsg.value.isThinking = (event.data === 'thinking');
           return;
         }
 
@@ -178,56 +157,39 @@ export const useChatStore = defineStore('chat', () => {
 
         if (event.event === 'message') {
           assistantMsg.value.isThinking = false;
-          
           const rawData = event.data;
           
-          // 处理结构化 JSON
           if (typeof rawData === 'object' && rawData !== null) {
             if (rawData.type === 'start') {
-              if (rawData.conversationId) {
-                currentConversationId.value = rawData.conversationId;
-              }
+              if (rawData.conversationId) currentConversationId.value = rawData.conversationId;
             }
             else if (rawData.type === 'text') {
-              if (rawData.content) {
-                assistantMsg.value.content += rawData.content;
-              }
+              if (rawData.content) assistantMsg.value.content += rawData.content;
             }
             else if (rawData.type === 'location') {
-              // 后端直接返回 location 列表的情况
-              if (Array.isArray(rawData.locations)) {
-                // 合并后端返回的 locations
-                const backendLocations = rawData.locations.map((item: any) => ({
-                  name: item.name,
-                  address: item.address,
-                  lat: item.lat,
-                  lng: item.lng,
-                  mapImageUrl: (item.images && item.images.length > 0) ? item.images[0] : '',
-                  images: item.images
-                }));
-                // 避免重复
+               if (Array.isArray(rawData.locations)) {
+                 const backendLocations = rawData.locations.map((item: any) => ({
+                    name: item.name,
+                    address: item.address,
+                    lat: item.lat,
+                    lng: item.lng,
+                    mapImageUrl: (item.images && item.images.length > 0) ? item.images[0] : '',
+                    images: item.images
+                 }));
                  assistantMsg.value.locations = [
                     ...(assistantMsg.value.locations || []),
                     ...backendLocations
                  ];
                  assistantMsg.value.type = 'location';
-              }
+               }
             }
-          } 
-          // 纯文本兼容
-          else {
+          } else {
              const text = String(rawData).replace(/^"|"$/g, '').replace(/\\n/g, '\n');
              assistantMsg.value.content += text;
           }
 
-          // ✅ 实时解析文本中的 Markdown 图片
-          // 每次文本更新都重新解析一遍，确保能捕获最新生成的图片
           const extractedLocations = extractLocationsFromText(assistantMsg.value.content);
           if (extractedLocations.length > 0) {
-            // 这里我们采用"并集"策略，或者如果解析到了就优先用解析的
-            // 为了简单，我们直接覆盖 locations（如果后端没发 type:location 事件的话）
-            // 或者如果已经有 locations 了，就不覆盖？
-            // 策略：如果 extractedLocations 数量比当前多，就更新
             if (extractedLocations.length > (assistantMsg.value.locations?.length || 0)) {
                assistantMsg.value.locations = extractedLocations;
                assistantMsg.value.type = 'location';
@@ -254,9 +216,7 @@ export const useChatStore = defineStore('chat', () => {
     try {
       const res: any = await http.post('/chat/conversations', { current: 1, pageSize: 20 });
       historyList.value = res.records || [];
-    } catch (e) {
-      console.error(e);
-    }
+    } catch (e) { console.error(e); }
   };
 
   const loadHistory = async (id: string | number) => {
@@ -267,8 +227,39 @@ export const useChatStore = defineStore('chat', () => {
         ...msg,
         type: (msg.locations && msg.locations.length > 0) ? 'location' : 'text'
       }));
-    } catch (e) {
-      console.error(e);
+    } catch (e) { console.error(e); }
+  };
+
+  // ✅ 恢复缺失的删除会话方法
+  const deleteConversation = async (id: number) => {
+    try {
+      await http.delete(`/chat/conversation/${id}`);
+      showToast('删除成功');
+      historyList.value = historyList.value.filter(item => item.id !== id);
+      if (currentConversationId.value === id) {
+        currentConversationId.value = null;
+        messages.value = [];
+      }
+      return true;
+    } catch (error) {
+      console.error('删除会话失败:', error);
+      return false;
+    }
+  };
+
+  // ✅ 恢复缺失的修改标题方法
+  const updateConversationTitle = async (id: number, newTitle: string) => {
+    try {
+      await http.put(`/chat/conversation/${id}/title`, { title: newTitle });
+      showToast('修改成功');
+      const item = historyList.value.find(i => i.id === id);
+      if (item) {
+        item.title = newTitle;
+      }
+      return true;
+    } catch (error) {
+      console.error('重命名失败:', error);
+      return false;
     }
   };
 
@@ -281,6 +272,8 @@ export const useChatStore = defineStore('chat', () => {
     initChat,
     sendMessage,
     fetchHistory,
-    loadHistory
+    loadHistory,
+    deleteConversation,      
+    updateConversationTitle  
   };
 });

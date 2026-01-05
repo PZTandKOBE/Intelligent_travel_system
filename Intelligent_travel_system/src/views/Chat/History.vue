@@ -103,25 +103,57 @@ const toChat = (id: number) => {
   router.push({ path: '/chat', query: { id } });
 };
 
+// 打开弹窗
 const openRenameDialog = (item: any) => {
+  console.log('点击编辑，当前项:', item);
+  if (!item || !item.id) {
+    showToast('数据异常：无法获取会话ID');
+    return;
+  }
   currentEditId.value = item.id;
   renameValue.value = item.title;
   showRename.value = true;
 };
 
+// 确认修改（核心逻辑）
 const onRenameConfirm = async (action: string) => {
+  console.log('触发 onRenameConfirm, action:', action);
+  
   if (action === 'confirm') {
+    // 1. 校验非空
     if (!renameValue.value.trim()) {
       showToast('标题不能为空');
-      return false;
+      return false; // 阻止关闭，停止转圈（Vant机制）
     }
-    if (currentEditId.value !== null) {
+
+    // 2. 校验ID
+    if (currentEditId.value === null) {
+      console.error('错误：currentEditId 为 null');
+      showToast('系统错误：ID丢失');
+      return true; // 关闭弹窗
+    }
+
+    console.log(`准备发起请求: ID=${currentEditId.value}, 新标题=${renameValue.value}`);
+    
+    try {
+      // 3. 调用接口
       const success = await chatStore.updateConversationTitle(currentEditId.value, renameValue.value);
-      if (success) return true;
-      return false;
+      console.log('接口调用结果:', success);
+
+      if (success) {
+        return true; // 成功，关闭弹窗
+      } else {
+        return false; // 失败，保持弹窗（通常 store 内部已经报了错）
+      }
+    } catch (error) {
+      // 4. 捕获所有异常
+      console.error('发生未知错误:', error);
+      showToast('请求发生异常');
+      return false; // 停止转圈，保持弹窗
     }
   }
-  return true;
+  
+  return true; // 取消操作，直接关闭
 };
 
 const handleDelete = (id: number) => {
