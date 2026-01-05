@@ -41,7 +41,7 @@
       class="custom-nav relative z-50"
     >
       <template #left v-if="!route.query.id">
-        <van-icon name="wap-nav" size="24" class="text-gray-700" />
+        <van-icon name="wap-nav" size="24" class="text-gray-700" @click="showHistory = true" />
       </template>
       <template #right>
         <div @click="router.push('/user')" class="flex items-center justify-center w-9 h-9 bg-white/50 backdrop-blur-md rounded-full cursor-pointer hover:bg-white/80 transition-all shadow-sm active:scale-95">
@@ -55,6 +55,7 @@
         <div class="text-center text-xs text-gray-400/80 mb-3 scale-90">
           {{ formatTime(msg.createdAt) }}
         </div>
+
         <div :class="['flex', msg.role === 'user' ? 'justify-end' : 'justify-start']">
           
           <div v-if="msg.role === 'assistant'" class="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center mr-3 flex-shrink-0 border-2 border-white shadow-sm overflow-hidden">
@@ -74,12 +75,12 @@
                  <div class="typing-dot"></div>
                  <div class="typing-dot animation-delay-200"></div>
                  <div class="typing-dot animation-delay-400"></div>
-                 <span class="ml-2 text-xs text-gray-400">思考中...</span>
+                 <span class="ml-2 text-xs text-gray-400">AI正在思考...</span>
               </div>
 
               <div 
-                v-else 
-                class="whitespace-pre-wrap message-content" 
+                v-else
+                class="message-content markdown-body" 
                 v-html="renderMessage(msg.content)"
               ></div>
             </div>
@@ -132,16 +133,20 @@
             :key="item.id"
             @click="switchConversation(item.id)"
             :class="[
-              'p-3 mb-3 rounded-xl border transition-all cursor-pointer active:scale-95',
+              'p-3 mb-3 rounded-xl border transition-all cursor-pointer active:scale-95 group relative',
               currentConversationId === item.id 
                 ? 'bg-indigo-50 border-indigo-200 shadow-inner' 
                 : 'bg-white border-gray-100 shadow-sm hover:shadow-md'
             ]"
           >
-            <div class="font-medium text-gray-800 line-clamp-1 mb-1">{{ item.title || '新会话' }}</div>
+            <div class="font-medium text-gray-800 line-clamp-1 mb-1 pr-6">{{ item.title || '新会话' }}</div>
             <div class="text-xs text-gray-400 flex justify-between">
               <span>{{ formatTime(item.updatedAt || item.createdAt) }}</span>
               <span v-if="currentConversationId === item.id" class="text-indigo-500">当前</span>
+            </div>
+            
+            <div class="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity" @click.stop="confirmDelete(item.id)">
+               <van-icon name="delete-o" class="text-red-400 hover:text-red-600" />
             </div>
           </div>
         </div>
@@ -198,8 +203,10 @@
 import { ref, onMounted, nextTick, watch, computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useChatStore } from '../../stores/chatStore';
+import { showConfirmDialog } from 'vant';
 import LocationCard from './LocationCard.vue';
 import ProductCard from './ProductCard.vue';
+import MarkdownIt from 'markdown-it'; // 引入 Markdown-it
 
 const route = useRoute();
 const router = useRouter();
@@ -211,6 +218,13 @@ const showHistory = ref(false);
 const currentConversationId = computed(() => chatStore.currentConversationId);
 const title = computed(() => route.query.id ? '历史回顾' : '非遗伴游');
 
+// 初始化 Markdown 实例
+const md = new MarkdownIt({
+  html: true,       // 允许 HTML (为了渲染图片)
+  linkify: true,    // 自动转换链接
+  breaks: true      // 换行符转 <br>
+});
+
 const quickActions = [
   '📍 附近推荐',
   '🎨 非遗介绍',
@@ -219,35 +233,50 @@ const quickActions = [
   '🏺 历史渊源'
 ];
 
-const w = computed(() => (chatStore.currentWeather || '').toLowerCase());
+// 天气状态判断
+const w = computed(() => (chatStore.envContext.weather || '').toLowerCase());
 const isRainy = computed(() => /雨|rain|shower|drizzle|storm/i.test(w.value));
 const isSunny = computed(() => /晴|sunny|clear/i.test(w.value));
 const isCloudy = computed(() => /云|阴|cloud|overcast/i.test(w.value));
 const isSnowy = computed(() => /雪|snow|blizzard/i.test(w.value));
 const isFoggy = computed(() => /雾|fog|mist|haze/i.test(w.value));
 
-// ✅ 核心修复：兼容三种图片格式的渲染
+/**
+ * 消息渲染函数
+ * 1. 预处理文本中的非标准图片格式
+ * 2. 使用 markdown-it 渲染
+ * 3. 后处理 img 标签样式
+ */
 const renderMessage = (content: string) => {
   if (!content) return '';
   
-  let html = content;
+  let processedContent = content;
 
-  // 1. Markdown 格式: ![alt](url)
-  html = html.replace(
-    /!\[(.*?)\]\((.*?)\)/g, 
-    '<img src="$2" alt="$1" class="chat-image rounded-xl my-2 max-w-full h-auto shadow-sm border border-gray-100" loading="lazy" />'
+  // 1. 转换自定义格式 -> Markdown 图片格式
+  // "地图图片：url" -> "![]()"
+  processedContent = processedContent.replace(
+    /地图图片：(https?:\/\/[^\s\n<]+)/g, 
+    '![]($1)'
   );
-
-  // 2. 旧文本格式: 地图图片：url
-  html = html.replace(
-    /地图图片：(https?:\/\/[^\s\n<]+)/g, // 排除已经替换成的 <img src...>
-    '<img src="$1" alt="地图图片" class="chat-image rounded-xl my-2 max-w-full h-auto shadow-sm border border-gray-100" loading="lazy" />'
-  );
-
-  // 3. ✅ 新增全角括号格式: （图片：url）
-  html = html.replace(
+  // "（图片：url）" -> "![]()"
+  processedContent = processedContent.replace(
     /（图片：(https?:\/\/[^\s\n）<]+)）/g,
-    '<img src="$1" alt="推荐图片" class="chat-image rounded-xl my-2 max-w-full h-auto shadow-sm border border-gray-100" loading="lazy" />'
+    '![]($1)'
+  );
+
+  // 2. Markdown 渲染
+  let html = md.render(processedContent);
+
+  // 3. 样式注入：给渲染出来的 img 添加 Tailwind 类
+  // 处理标准 Markdown 图片
+  html = html.replace(
+    /<img src="(.*?)" alt="(.*?)">/g, 
+    '<img src="$1" alt="$2" class="chat-image rounded-xl my-2 max-w-full h-auto shadow-sm border border-gray-100" loading="lazy" />'
+  );
+  // 处理自闭合标签
+  html = html.replace(
+    /<img src="(.*?)" alt="(.*?)" \/>/g, 
+    '<img src="$1" alt="$2" class="chat-image rounded-xl my-2 max-w-full h-auto shadow-sm border border-gray-100" loading="lazy" />'
   );
 
   return html;
@@ -283,18 +312,9 @@ const initOrLoad = async () => {
   if (historyId) {
     await chatStore.loadHistory(historyId);
   } else {
-    if (chatStore.messages.length === 0 || chatStore.currentConversationId !== null) {
-      if (chatStore.messages.length === 0) {
-        if (navigator.geolocation) {
-           navigator.geolocation.getCurrentPosition(
-             (pos) => chatStore.initChat(pos.coords.latitude, pos.coords.longitude),
-             () => chatStore.initChat(23.1291, 113.2644),
-             { timeout: 5000 }
-           );
-        } else {
-           chatStore.initChat(23.1291, 113.2644);
-        }
-      }
+    // 只有在没有消息且未初始化过的情况才初始化
+    if (chatStore.messages.length === 0) {
+      await chatStore.initChat();
     }
   }
   scrollToBottom();
@@ -319,6 +339,7 @@ const handleSend = () => {
   inputContent.value = '';
 };
 
+// 手势相关
 const touchStart = ref({ x: 0, y: 0 });
 const minSwipeDistance = 50; 
 const handleTouchStart = (e: TouchEvent) => {
@@ -329,7 +350,7 @@ const handleTouchEnd = (e: TouchEvent) => {
   const deltaX = touchEnd.x - touchStart.value.x;
   const deltaY = touchEnd.y - touchStart.value.y;
   if (Math.abs(deltaX) > minSwipeDistance && Math.abs(deltaY) < 50) {
-    if (deltaX < 0) showHistory.value = true;
+    if (deltaX < 0) showHistory.value = true; // 左滑显示历史
   }
 };
 
@@ -344,11 +365,20 @@ const switchConversation = async (id: number) => {
 };
 
 const startNewChat = () => {
-  chatStore.messages = [];
-  chatStore.currentConversationId = null;
-  initOrLoad();
+  chatStore.resetChat();
   showHistory.value = false;
   if (route.query.id) router.push('/chat');
+};
+
+const confirmDelete = (id: number) => {
+  showConfirmDialog({
+    title: '删除会话',
+    message: '确定要删除这条会话记录吗？',
+  })
+    .then(() => {
+      chatStore.deleteConversation(id);
+    })
+    .catch(() => {});
 };
 </script>
 
@@ -373,14 +403,76 @@ const startNewChat = () => {
   backdrop-filter: blur(10px);
 }
 
-.message-content :deep(img) {
-  max-width: 100%;
-  height: auto;
-  border-radius: 12px;
-  display: block;
-  margin: 8px 0;
+/* ==================== Markdown 样式 ==================== */
+.message-content :deep(p) {
+  margin: 0.5em 0;
+}
+.message-content :deep(p:first-child) {
+  margin-top: 0;
+}
+.message-content :deep(p:last-child) {
+  margin-bottom: 0;
+}
+.message-content :deep(ul), 
+.message-content :deep(ol) {
+  margin: 0.5em 0;
+  padding-left: 1.5em;
+  list-style-type: disc;
+}
+.message-content :deep(ol) {
+  list-style-type: decimal;
+}
+.message-content :deep(li) {
+  margin: 0.2em 0;
+}
+.message-content :deep(strong) {
+  font-weight: 600;
+  color: #4f46e5; /* indigo-600 */
+}
+.message-content :deep(code) {
+  background-color: rgba(0, 0, 0, 0.05);
+  padding: 0.1em 0.3em;
+  border-radius: 0.2em;
+  font-family: monospace;
+  font-size: 0.9em;
+  color: #e11d48; /* rose-600 */
+}
+.message-content :deep(pre) {
+  background-color: #f8fafc;
+  padding: 0.8em;
+  border-radius: 0.5em;
+  overflow-x: auto;
+  margin: 0.5em 0;
+  border: 1px solid #e2e8f0;
+}
+.message-content :deep(pre code) {
+  background-color: transparent;
+  padding: 0;
+  color: inherit;
+}
+.message-content :deep(blockquote) {
+  border-left: 3px solid #cbd5e1;
+  padding-left: 0.8em;
+  color: #64748b;
+  margin: 0.5em 0;
+}
+.message-content :deep(h1), 
+.message-content :deep(h2), 
+.message-content :deep(h3) {
+  font-weight: 700;
+  margin-top: 1em;
+  margin-bottom: 0.5em;
+  line-height: 1.3;
+}
+.message-content :deep(h1) { font-size: 1.4em; }
+.message-content :deep(h2) { font-size: 1.25em; }
+.message-content :deep(h3) { font-size: 1.1em; }
+.message-content :deep(a) {
+  color: #4f46e5;
+  text-decoration: underline;
 }
 
+/* ==================== 打字机圆点动画 ==================== */
 .typing-dot {
   width: 6px;
   height: 6px;
@@ -399,20 +491,19 @@ const startNewChat = () => {
 }
 
 @keyframes typing {
-
   0%,
   80%,
   100% {
     transform: scale(0);
     opacity: 0.5;
   }
-
   40% {
     transform: scale(1);
     opacity: 1;
   }
 }
 
+/* ==================== 天气背景动画 CSS ==================== */
 .weather-layer {
   position: absolute;
   top: 0;
@@ -423,10 +514,10 @@ const startNewChat = () => {
   opacity: 0.6;
 }
 
+/* 雨天 */
 .rain-container {
   background: linear-gradient(to bottom, #cfd9df 0%, #e2ebf0 100%);
 }
-
 .rain-layer {
   position: absolute;
   width: 100%;
@@ -435,19 +526,16 @@ const startNewChat = () => {
   background-size: 2px 100%;
   opacity: 0;
 }
-
 .layer-1 {
   animation: rain-fall 1s linear infinite;
   opacity: 0.6;
 }
-
 .layer-2 {
   background-size: 3px 100%;
   animation: rain-fall 0.7s linear infinite;
   opacity: 0.4;
   left: 20%;
 }
-
 .rain-overlay {
   position: absolute;
   bottom: 0;
@@ -455,27 +543,16 @@ const startNewChat = () => {
   height: 30%;
   background: linear-gradient(to top, rgba(255, 255, 255, 1), transparent);
 }
-
 @keyframes rain-fall {
-  0% {
-    transform: translateY(-100vh);
-    opacity: 0;
-  }
-
-  50% {
-    opacity: 1;
-  }
-
-  100% {
-    transform: translateY(100vh);
-    opacity: 0;
-  }
+  0% { transform: translateY(-100vh); opacity: 0; }
+  50% { opacity: 1; }
+  100% { transform: translateY(100vh); opacity: 0; }
 }
 
+/* 晴天 */
 .sun-container {
   background: linear-gradient(to bottom, #fff7e6 0%, #ffffff 100%);
 }
-
 .sun-glow {
   position: absolute;
   top: -150px;
@@ -486,7 +563,6 @@ const startNewChat = () => {
   border-radius: 50%;
   animation: sun-pulse 6s ease-in-out infinite alternate;
 }
-
 .sun-beams {
   position: absolute;
   top: -200px;
@@ -497,33 +573,19 @@ const startNewChat = () => {
   border-radius: 50%;
   animation: sun-rotate 20s linear infinite;
 }
-
 @keyframes sun-pulse {
-  0% {
-    transform: scale(1);
-    opacity: 0.8;
-  }
-
-  100% {
-    transform: scale(1.1);
-    opacity: 1;
-  }
+  0% { transform: scale(1); opacity: 0.8; }
+  100% { transform: scale(1.1); opacity: 1; }
 }
-
 @keyframes sun-rotate {
-  from {
-    transform: rotate(0deg);
-  }
-
-  to {
-    transform: rotate(360deg);
-  }
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
+/* 阴/云天 */
 .cloud-container {
   background: linear-gradient(to bottom, #e0eafc 0%, #cfdef3 100%);
 }
-
 .cloud {
   background: #fff;
   border-radius: 100px;
@@ -531,15 +593,12 @@ const startNewChat = () => {
   margin: 120px auto 20px;
   opacity: 0.8;
 }
-
-.cloud:after,
-.cloud:before {
+.cloud:after, .cloud:before {
   content: '';
   position: absolute;
   background: inherit;
   z-index: -1;
 }
-
 .cloud:after {
   width: 100px;
   height: 100px;
@@ -547,7 +606,6 @@ const startNewChat = () => {
   left: 50px;
   border-radius: 100px;
 }
-
 .cloud:before {
   width: 120px;
   height: 120px;
@@ -555,7 +613,6 @@ const startNewChat = () => {
   right: 50px;
   border-radius: 200px;
 }
-
 .x1 {
   width: 250px;
   height: 80px;
@@ -564,7 +621,6 @@ const startNewChat = () => {
   animation: moveclouds 25s linear infinite;
   transform: scale(0.6);
 }
-
 .x2 {
   width: 300px;
   height: 100px;
@@ -573,7 +629,6 @@ const startNewChat = () => {
   animation: moveclouds 35s linear infinite;
   transform: scale(0.8);
 }
-
 .x3 {
   width: 200px;
   height: 60px;
@@ -582,21 +637,15 @@ const startNewChat = () => {
   animation: moveclouds 20s linear infinite;
   transform: scale(0.4);
 }
-
 @keyframes moveclouds {
-  0% {
-    margin-left: 100%;
-  }
-
-  100% {
-    margin-left: -100%;
-  }
+  0% { margin-left: 100%; }
+  100% { margin-left: -100%; }
 }
 
+/* 雪天 */
 .snow-container {
   background: linear-gradient(to bottom, #E0EAFC 0%, #CFDEF3 100%);
 }
-
 .snow {
   position: absolute;
   width: 100%;
@@ -604,62 +653,46 @@ const startNewChat = () => {
   background-image: radial-gradient(#fff 2px, transparent 2px);
   background-size: 50px 50px;
 }
-
 .layer-1 {
   animation: snow-fall 10s linear infinite;
   opacity: 0.8;
 }
-
 .layer-2 {
   background-size: 40px 40px;
   animation: snow-fall 8s linear infinite;
   opacity: 0.6;
 }
-
 .layer-3 {
   background-size: 30px 30px;
   animation: snow-fall 6s linear infinite;
   opacity: 0.4;
 }
-
 @keyframes snow-fall {
-  0% {
-    background-position: 0 0;
-  }
-
-  100% {
-    background-position: 50px 500px;
-  }
+  0% { background-position: 0 0; }
+  100% { background-position: 50px 500px; }
 }
 
+/* 雾天 */
 .fog-container {
   background: #dcdcdc;
 }
-
 .fog-img {
   position: absolute;
   height: 100vh;
   width: 300vw;
+  /* 使用一个可靠的雾图片源，或者使用本地资源 */
   background: url('https://raw.githubusercontent.com/danielstuart14/CSS_FOG_ANIMATION/master/fog1.png') repeat-x;
   background-size: contain;
 }
-
 .fog-img-first {
   animation: fog 60s linear infinite;
 }
-
 .fog-img-second {
   animation: fog 40s linear infinite;
   top: 30%;
 }
-
 @keyframes fog {
-  0% {
-    transform: translate3d(0, 0, 0);
-  }
-
-  100% {
-    transform: translate3d(-200vw, 0, 0);
-  }
+  0% { transform: translate3d(0, 0, 0); }
+  100% { transform: translate3d(-200vw, 0, 0); }
 }
 </style>
