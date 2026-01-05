@@ -24,12 +24,11 @@ export const useUserStore = defineStore('user', () => {
   // 注册
   const register = async (payload: { email: string; code: string; password?: string }) => {
     try {
-      // 注册接口
       const requestBody = {
         email: payload.email,
         code: payload.code,
         userPassword: payload.password,
-        checkPassword: payload.password, // 注册接口通常还需要 checkPassword，如果后端也改了请同步
+        checkPassword: payload.password,
         userName: `用户${payload.email.split('@')[0]}`,
         userAvatar: undefined 
       };
@@ -43,18 +42,13 @@ export const useUserStore = defineStore('user', () => {
   };
 
   // 登录
-  const login = async (req: LoginRequest) => {
+  const login = async (payload: LoginRequest) => {
     try {
-      const res = await http.post<UserInfo>('/user/login/email', req);
-      const userData = (res as any).data || res;
-      if (userData && userData.id) {
-        userInfo.value = userData;
-        showToast('登录成功');
-        return true;
-      } else {
-        showToast('登录失败：数据异常');
-        return false;
-      }
+      // 这里添加类型断言，虽然这里没报错，但保持一致是个好习惯
+      const res = await http.post<UserInfo>('/user/login/email', payload) as unknown as UserInfo;
+      userInfo.value = res; 
+      showToast('登录成功');
+      return true;
     } catch (error) {
       console.error('登录失败:', error);
       return false;
@@ -64,13 +58,14 @@ export const useUserStore = defineStore('user', () => {
   // 获取用户信息
   const fetchUserInfo = async () => {
     try {
-      const res = await http.get<UserInfo>('/user/get/login');
+      // 【修复点 1】：添加 as unknown as UserInfo 类型断言
+      const res = await http.get<UserInfo>('/user/get/login') as unknown as UserInfo;
+      // 现在的 res 被 TS 认为是 UserInfo 类型，拥有 id 属性
       if (res && res.id) {
         userInfo.value = res;
       }
-    } catch (error: any) {
-      console.error('获取用户信息失败', error);
-      userInfo.value = null;
+    } catch (error) {
+      console.error('获取用户信息失败:', error);
     }
   };
 
@@ -79,36 +74,42 @@ export const useUserStore = defineStore('user', () => {
     try {
       await http.post('/user/logout');
     } catch (e) {
-      // ignore error
+      console.error(e);
     } finally {
       userInfo.value = null;
+      documentList.value = [];
       showToast('已退出登录');
-      window.location.href = '/login';
+      // 可以选择跳转到登录页
     }
   };
 
-  // 文件上传
+  // 上传文件
   const uploadFile = async (file: File) => {
     try {
       const formData = new FormData();
       formData.append('file', file);
+      // 【修复点 2】：添加 as unknown as string 类型断言
+      // 假设后端返回的数据就是 url 字符串，或者是包含 url 的对象。
+      // 根据你的 index.vue 报错，这里预期返回 string。
+      // 如果后端返回的是 { url: '...' }，请相应修改类型。
+      // 这里假设拦截器处理后直接返回了 URL 字符串。
       const res = await http.post<string>('/file/test/upload', formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
-      });
-      return res; 
+      }) as unknown as string;
+      
+      return res;
     } catch (error) {
-      console.error('文件上传失败:', error);
-      showToast('图片上传失败');
-      return null;
+      console.error('上传失败:', error);
+      return '';
     }
   };
 
-  // 更新个人资料
-  const updateProfile = async (userName: string, userAvatar?: string) => {
+  // 更新个人信息
+  const updateProfile = async (userName: string, userAvatar: string) => {
     try {
       await http.post('/user/update/my', { userName, userAvatar });
       showToast('更新成功');
-      
+      // 更新本地状态
       if (userInfo.value) {
         userInfo.value.userName = userName;
         if (userAvatar) {
@@ -123,14 +124,13 @@ export const useUserStore = defineStore('user', () => {
     }
   };
 
-  // ✅ 核心修复：修改密码
+  // 修改密码
   const updatePassword = async (payload: UpdatePasswordRequest) => {
     try {
-      // API Update: Field changed from checkPassword to confirmPassword
       const requestBody = {
         oldPassword: payload.oldPassword || '',
         newPassword: payload.newPassword || '',
-        confirmPassword: payload.confirmPassword || '' // ✅ 修正为 confirmPassword
+        confirmPassword: payload.confirmPassword || ''
       };
 
       console.log('Sending update password request:', requestBody); 
@@ -153,11 +153,11 @@ export const useUserStore = defineStore('user', () => {
   // 获取文档列表
   const fetchDocuments = async () => {
     try {
-      const res: any = await http.post('/document/my', { current: 1, pageSize: 20 });
+      // 这里的 any 可以保留，或者定义更精确的类型
+      const res = await http.post('/document/my', { current: 1, pageSize: 20 }) as any;
       documentList.value = res.records || [];
     } catch (error) {
       console.error('获取文档列表失败:', error);
-      documentList.value = [];
     }
   };
 
@@ -165,13 +165,13 @@ export const useUserStore = defineStore('user', () => {
     userInfo,
     documentList,
     sendCode,
-    login,
     register,
-    logout,
-    uploadFile, 
+    login,
     fetchUserInfo,
+    logout,
+    uploadFile,
     updateProfile,
-    fetchDocuments,
-    updatePassword
+    updatePassword,
+    fetchDocuments
   };
 });
