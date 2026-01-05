@@ -6,7 +6,7 @@
 
     <div class="z-10 flex flex-col items-center w-full px-8 animate-fade-in-up">
       <div class="mb-8 text-center">
-        <h1 class="text-4xl font-extrabold text-slate-800 tracking-wider mb-2">寻遗</h1>
+        <h1 class="text-4xl font-extrabold text-slate-800 tracking-wider mb-2">非遗伴游</h1>
         <p class="text-sm text-slate-500 tracking-[0.2em] uppercase">Intelligent Travel Agent</p>
       </div>
 
