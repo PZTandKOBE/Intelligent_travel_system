@@ -1,18 +1,28 @@
-import { defineConfig } from 'vite';
-import vue from '@vitejs/plugin-vue';
+// vite.config.ts
+import { defineConfig } from 'vite'
+import vue from '@vitejs/plugin-vue'
+import path from 'path'
 
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [vue()],
-  server: {
-    port: 5173,
-    proxy: {
-      '/api': {
-        // ✅ 更新为新的后端地址 (注意：如果后端是 http://14.103.124.109:8080/api，这里通常填 IP 即可，Vite 会自动拼接 /api)
-        target: 'http://14.103.124.109:8080', 
-        changeOrigin: true,
-        // rewrite: (path) => path.replace(/^\/api/, '') // 保持注释，保留 /api 前缀
-      },
+  resolve: {
+    alias: {
+      '@': path.resolve(__dirname, './src'),
     },
   },
-});
+  server: {
+    host: '0.0.0.0', // 允许局域网访问
+    port: 5173,
+    proxy: {
+      // ✅ 核心配置：将 /api 开头的请求代理到新的后端 IP
+      '/api': {
+        target: 'http://14.103.124.109:8080',
+        changeOrigin: true, // 允许跨域
+        // 如果后端接口本身包含 /api 前缀，则不需要 rewrite
+        // 如果后端接口不包含 /api，需要取消注释下面这行来重写路径
+        // rewrite: (path) => path.replace(/^\/api/, '') 
+      }
+    }
+  }
+})

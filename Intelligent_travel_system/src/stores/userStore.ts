@@ -9,6 +9,7 @@ export const useUserStore = defineStore('user', () => {
   const userInfo = ref<UserInfo | null>(null);
   const documentList = ref<DocumentItem[]>([]);
 
+  // 发送验证码
   const sendCode = async (email: string) => {
     try {
       await http.post('/user/register/send-code', { email });
@@ -20,13 +21,15 @@ export const useUserStore = defineStore('user', () => {
     }
   };
 
+  // 注册
   const register = async (payload: { email: string; code: string; password?: string }) => {
     try {
+      // 注册接口
       const requestBody = {
         email: payload.email,
         code: payload.code,
         userPassword: payload.password,
-        confirmPassword: payload.password,
+        checkPassword: payload.password, // 注册接口通常还需要 checkPassword，如果后端也改了请同步
         userName: `用户${payload.email.split('@')[0]}`,
         userAvatar: undefined 
       };
@@ -39,6 +42,7 @@ export const useUserStore = defineStore('user', () => {
     }
   };
 
+  // 登录
   const login = async (req: LoginRequest) => {
     try {
       const res = await http.post<UserInfo>('/user/login/email', req);
@@ -57,6 +61,7 @@ export const useUserStore = defineStore('user', () => {
     }
   };
 
+  // 获取用户信息
   const fetchUserInfo = async () => {
     try {
       const res = await http.get<UserInfo>('/user/get/login');
@@ -65,14 +70,16 @@ export const useUserStore = defineStore('user', () => {
       }
     } catch (error: any) {
       console.error('获取用户信息失败', error);
+      userInfo.value = null;
     }
   };
 
+  // 退出登录
   const logout = async () => {
     try {
       await http.post('/user/logout');
     } catch (e) {
-      // ignore
+      // ignore error
     } finally {
       userInfo.value = null;
       showToast('已退出登录');
@@ -80,6 +87,7 @@ export const useUserStore = defineStore('user', () => {
     }
   };
 
+  // 文件上传
   const uploadFile = async (file: File) => {
     try {
       const formData = new FormData();
@@ -95,6 +103,7 @@ export const useUserStore = defineStore('user', () => {
     }
   };
 
+  // 更新个人资料
   const updateProfile = async (userName: string, userAvatar?: string) => {
     try {
       await http.post('/user/update/my', { userName, userAvatar });
@@ -114,18 +123,17 @@ export const useUserStore = defineStore('user', () => {
     }
   };
 
-  // ✅ 核心修复：修改为 Form Data 格式提交
-const updatePassword = async (payload: UpdatePasswordRequest) => {
+  // ✅ 核心修复：修改密码
+  const updatePassword = async (payload: UpdatePasswordRequest) => {
     try {
-      // ✅ 再次修正：尝试回退到文档标准
-      // 后端报“参数不能为空”，极大概率是因为没找到它要的 checkPassword 字段
+      // API Update: Field changed from checkPassword to confirmPassword
       const requestBody = {
-        oldPassword: payload.oldPassword,
-        newPassword: payload.newPassword,
-        checkPassword: payload.confirmPassword // ⚠️ 这里强行把前端的 confirmPassword 映射给后端的 checkPassword
+        oldPassword: payload.oldPassword || '',
+        newPassword: payload.newPassword || '',
+        confirmPassword: payload.confirmPassword || '' // ✅ 修正为 confirmPassword
       };
 
-      console.log('正在发送修改密码请求:', requestBody); // 方便你调试看参数
+      console.log('Sending update password request:', requestBody); 
 
       await http.post('/user/update/password', requestBody);
 
@@ -141,6 +149,8 @@ const updatePassword = async (payload: UpdatePasswordRequest) => {
       return false;
     }
   };
+
+  // 获取文档列表
   const fetchDocuments = async () => {
     try {
       const res: any = await http.post('/document/my', { current: 1, pageSize: 20 });

@@ -70,6 +70,7 @@
 import { reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { useUserStore } from '../../stores/userStore';
+import { showToast } from 'vant';
 
 const router = useRouter();
 const userStore = useUserStore();
@@ -96,6 +97,12 @@ const validatorSame = (val: string) => {
 };
 
 const onSubmit = async () => {
+  // 二次校验，防止空值提交（虽然 van-form rules 已经挡住了）
+  if (!form.oldPassword || !form.newPassword || !form.confirmPassword) {
+    showToast('请填写完整信息');
+    return;
+  }
+
   loading.value = true;
   try {
     const success = await userStore.updatePassword({
@@ -103,12 +110,14 @@ const onSubmit = async () => {
       newPassword: form.newPassword,
       confirmPassword: form.confirmPassword
     });
-    // 成功会自动跳转，失败则取消 loading
+    
+    // 如果 Store 返回 true，说明修改成功并正在跳转/登出，不需要取消 loading
     if (!success) {
       loading.value = false;
     }
   } catch (error) {
     loading.value = false;
+    showToast('网络请求异常');
   }
 };
 </script>

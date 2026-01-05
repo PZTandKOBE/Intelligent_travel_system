@@ -5,14 +5,30 @@
     @touchend="handleTouchEnd"
   >
     
-    <div v-if="isRainy" class="weather-layer rain-container pointer-events-none">
-      <div class="rain-layer layer-1"></div>
-      <div class="rain-layer layer-2"></div>
-      <div class="rain-overlay"></div>
-    </div>
-    
-    <div v-if="isSunny" class="weather-layer sun-container pointer-events-none">
-      <div class="sun-beams"></div> <div class="sun-glow"></div>  
+    <div class="absolute inset-0 pointer-events-none z-0 overflow-hidden">
+      <div v-if="isRainy" class="weather-layer rain-container">
+        <div class="rain-layer layer-1"></div>
+        <div class="rain-layer layer-2"></div>
+        <div class="rain-overlay"></div>
+      </div>
+      <div v-if="isSunny" class="weather-layer sun-container">
+        <div class="sun-beams"></div>
+        <div class="sun-glow"></div>
+      </div>
+      <div v-if="isCloudy" class="weather-layer cloud-container">
+        <div class="cloud x1"></div>
+        <div class="cloud x2"></div>
+        <div class="cloud x3"></div>
+      </div>
+      <div v-if="isSnowy" class="weather-layer snow-container">
+        <div class="snow layer-1"></div>
+        <div class="snow layer-2"></div>
+        <div class="snow layer-3"></div>
+      </div>
+      <div v-if="isFoggy" class="weather-layer fog-container">
+        <div class="fog-img fog-img-first"></div>
+        <div class="fog-img fog-img-second"></div>
+      </div>
     </div>
 
     <van-nav-bar 
@@ -49,9 +65,9 @@
             <span class="text-xl">🤖</span>
           </div>
 
-          <div class="flex flex-col max-w-[80%]">
+          <div class="flex flex-col max-w-[85%]">
             
-            <div v-if="msg.content || msg.isLoading" 
+            <div 
               :class="[
                 'px-4 py-3 rounded-2xl text-[15px] leading-relaxed shadow-sm break-words transition-all',
                 msg.role === 'user' 
@@ -59,19 +75,35 @@
                   : 'bg-white/90 backdrop-blur-sm text-gray-800 rounded-tl-sm border border-gray-100 shadow-gray-100'
               ]"
             >
-              <div v-if="msg.isLoading && !msg.content" class="flex items-center space-x-2 py-1">
-                <van-loading type="spinner" color="#6366f1" size="16px" />
-                <span class="text-xs text-indigo-400 font-medium animate-pulse">正在检索非遗知识库...</span>
+              <div v-if="msg.isThinking && !msg.content" class="flex items-center space-x-1 py-1 h-6">
+                 <div class="typing-dot"></div>
+                 <div class="typing-dot animation-delay-200"></div>
+                 <div class="typing-dot animation-delay-400"></div>
+                 <span class="ml-2 text-xs text-gray-400">思考中...</span>
               </div>
 
-              <div v-else class="whitespace-pre-wrap">{{ msg.content }}</div>
+              <div 
+                v-else 
+                class="whitespace-pre-wrap message-content" 
+                v-html="renderMessage(msg.content)"
+              ></div>
             </div>
 
+            <template v-if="msg.locations && msg.locations.length > 0">
+              <LocationCard 
+                v-for="(loc, idx) in msg.locations"
+                :key="idx"
+                :data="loc"
+                class="mt-3 shadow-md"
+              />
+            </template>
+            
             <LocationCard 
-              v-if="msg.type === 'location' && msg.location" 
+              v-else-if="msg.type === 'location' && msg.location" 
               :data="msg.location"
               class="mt-3 shadow-md"
             />
+            
             <template v-if="msg.type === 'product' && msg.products">
               <ProductCard 
                 v-for="(prod, idx) in msg.products" 
@@ -100,10 +132,8 @@
           <h2 class="text-lg font-bold text-gray-800">历史会话</h2>
           <van-icon name="cross" @click="showHistory = false" class="text-gray-500" />
         </div>
-        
         <div class="flex-1 overflow-y-auto p-2">
           <van-empty v-if="!chatStore.historyList?.length" description="暂无历史记录" />
-          
           <div 
             v-for="item in chatStore.historyList" 
             :key="item.id"
@@ -122,7 +152,6 @@
             </div>
           </div>
         </div>
-
         <div class="p-4 border-t bg-white">
            <van-button block type="primary" plain size="small" @click="startNewChat">
              <template #icon><van-icon name="plus" /></template>
@@ -133,7 +162,6 @@
     </van-popup>
 
     <div class="bg-white/80 backdrop-blur-xl border-t border-gray-100/50 safe-area-bottom relative z-50 shadow-[0_-4px_20px_rgba(0,0,0,0.02)] flex flex-col">
-      
       <div class="flex gap-2 px-4 pt-3 pb-1 overflow-x-auto no-scrollbar w-full">
         <button
           v-for="item in quickActions"
@@ -155,7 +183,6 @@
           placeholder="问问附近的非遗体验..." 
           :disabled="chatStore.isStreaming"
         />
-        
         <button 
           @click="handleSend"
           :disabled="!inputContent.trim() || chatStore.isStreaming"
@@ -181,7 +208,6 @@ import { useRoute, useRouter } from 'vue-router';
 import { useChatStore } from '../../stores/chatStore';
 import LocationCard from './LocationCard.vue';
 import ProductCard from './ProductCard.vue';
-import { showToast } from 'vant';
 
 const route = useRoute();
 const router = useRouter();
@@ -189,13 +215,12 @@ const chatStore = useChatStore();
 const inputContent = ref('');
 const chatContainer = ref<HTMLElement | null>(null);
 
-// 历史会话侧边栏控制
+// 历史会话侧边栏
 const showHistory = ref(false);
 const currentConversationId = computed(() => chatStore.currentConversationId);
-
 const title = computed(() => route.query.id ? '历史回顾' : '非遗伴游');
 
-// 定义快捷问题列表
+// 快捷操作
 const quickActions = [
   '📍 附近推荐',
   '🎨 非遗介绍',
@@ -204,16 +229,24 @@ const quickActions = [
   '🏺 历史渊源'
 ];
 
-// 智能天气判断
-const isRainy = computed(() => {
-  const w = chatStore.currentWeather || '';
-  return /雨|Rain|Shower|Drizzle|Storm/i.test(w);
-});
+// 天气逻辑
+const w = computed(() => (chatStore.currentWeather || '').toLowerCase());
+const isRainy = computed(() => /雨|rain|shower|drizzle|storm/i.test(w.value));
+const isSunny = computed(() => /晴|sunny|clear/i.test(w.value));
+const isCloudy = computed(() => /云|阴|cloud|overcast/i.test(w.value));
+const isSnowy = computed(() => /雪|snow|blizzard/i.test(w.value));
+const isFoggy = computed(() => /雾|fog|mist|haze/i.test(w.value));
 
-const isSunny = computed(() => {
-  const w = chatStore.currentWeather || '';
-  return /晴|Sunny|Clear/i.test(w);
-});
+// ✅ 核心修复：解析 Markdown 图片语法
+const renderMessage = (content: string) => {
+  if (!content) return '';
+  // 将 ![alt](url) 替换为 <img ...>
+  // 使用正则非贪婪匹配
+  return content.replace(
+    /!\[(.*?)\]\((.*?)\)/g, 
+    '<img src="$2" alt="$1" class="chat-image rounded-xl my-2 max-w-full h-auto shadow-sm border border-gray-100" loading="lazy" />'
+  );
+};
 
 // 格式化时间
 const formatTime = (time: string | number) => {
@@ -237,7 +270,6 @@ const scrollToBottom = () => {
 watch(() => chatStore.messages.length, scrollToBottom);
 watch(() => chatStore.messages[chatStore.messages.length - 1], () => scrollToBottom(), { deep: true });
 
-// 监听侧边栏打开，获取历史记录
 watch(showHistory, (newVal) => {
   if (newVal) {
     chatStore.fetchHistory();
@@ -250,17 +282,18 @@ const initOrLoad = async () => {
     await chatStore.loadHistory(historyId);
   } else {
     if (chatStore.messages.length === 0 || chatStore.currentConversationId !== null) {
-      if (navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition(
-          (pos) => chatStore.initChat(pos.coords.latitude, pos.coords.longitude),
-          () => {
-             // 默认广州
-             chatStore.initChat(23.1291, 113.2644);
-          },
-          { timeout: 5000 }
-        );
-      } else {
-        chatStore.initChat(23.1291, 113.2644);
+      // 默认先用 store 里的，如果有缓存
+      if (chatStore.messages.length === 0) {
+        // 尝试获取位置并初始化，chatStore 内部有默认兜底
+        if (navigator.geolocation) {
+           navigator.geolocation.getCurrentPosition(
+             (pos) => chatStore.initChat(pos.coords.latitude, pos.coords.longitude),
+             () => chatStore.initChat(23.1291, 113.2644),
+             { timeout: 5000 }
+           );
+        } else {
+           chatStore.initChat(23.1291, 113.2644);
+        }
       }
     }
   }
@@ -275,18 +308,14 @@ onMounted(() => {
   initOrLoad();
 });
 
-// ⭐ 修复后的 handleBack 逻辑 ⭐
 const handleBack = () => {
   if (route.query.id) {
-    // 只有在查看历史记录时，才执行返回
     router.back();
   } else {
-    // 在主会话界面，点击左上角直接打开侧边栏
     showHistory.value = true;
   }
 };
 
-// 处理快捷标签点击
 const handleQuickAction = (text: string) => {
   if (chatStore.isStreaming) return;
   chatStore.sendMessage(text);
@@ -298,57 +327,37 @@ const handleSend = () => {
   inputContent.value = '';
 };
 
-// ================== 手势滑动逻辑 ==================
+// 手势
 const touchStart = ref({ x: 0, y: 0 });
-const minSwipeDistance = 50; // 最小滑动距离
-
+const minSwipeDistance = 50; 
 const handleTouchStart = (e: TouchEvent) => {
-  touchStart.value = {
-    x: e.touches[0].clientX,
-    y: e.touches[0].clientY
-  };
+  touchStart.value = { x: e.touches[0].clientX, y: e.touches[0].clientY };
 };
-
 const handleTouchEnd = (e: TouchEvent) => {
-  const touchEnd = {
-    x: e.changedTouches[0].clientX,
-    y: e.changedTouches[0].clientY
-  };
-
+  const touchEnd = { x: e.changedTouches[0].clientX, y: e.changedTouches[0].clientY };
   const deltaX = touchEnd.x - touchStart.value.x;
   const deltaY = touchEnd.y - touchStart.value.y;
-
-  // 检测水平滑动：X轴距离足够，且Y轴偏移较小（防止斜滑触发）
   if (Math.abs(deltaX) > minSwipeDistance && Math.abs(deltaY) < 50) {
-    if (deltaX < 0) {
-      // 向左滑动 (Right -> Left): 打开右侧侧边栏
-      showHistory.value = true;
-    } 
+    if (deltaX < 0) showHistory.value = true;
   }
 };
 
-// ================== 历史记录操作 ==================
 const switchConversation = async (id: number) => {
   if (currentConversationId.value === id) {
     showHistory.value = false;
     return;
   }
-  
   await chatStore.loadHistory(id);
   showHistory.value = false;
-  
   if (route.query.id) {
     router.replace({ query: { ...route.query, id: id } });
   }
 };
 
 const startNewChat = () => {
-  // chatStore.$reset(); 
   chatStore.messages = [];
   chatStore.currentConversationId = null;
-  
   initOrLoad();
-  
   showHistory.value = false;
   if (route.query.id) {
     router.push('/chat');
@@ -362,25 +371,56 @@ const startNewChat = () => {
   padding-bottom: env(safe-area-inset-bottom);
 }
 
-/* 隐藏横向滚动条但保留滚动功能 */
-.no-scrollbar::-webkit-scrollbar {
-  display: none;
-}
-.no-scrollbar {
-  -ms-overflow-style: none;
-  scrollbar-width: none;
-}
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 
-/* 导航栏透明处理 */
 .custom-nav {
   --van-nav-bar-background: rgba(255, 255, 255, 0.6);
   --van-nav-bar-title-text-color: #1f2937;
   backdrop-filter: blur(10px);
 }
 
-/* ================== 天气动画核心 CSS ================== */
+.message-content :deep(img) {
+  max-width: 100%;
+  height: auto;
+  border-radius: 12px;
+  display: block;
+  margin: 8px 0;
+}
 
-/* 1. 全局容器 */
+/* 动画和天气样式保持不变 */
+.typing-dot {
+  width: 6px;
+  height: 6px;
+  background-color: #6366f1;
+  border-radius: 50%;
+  animation: typing 1.4s infinite ease-in-out both;
+  margin-right: 3px;
+}
+
+.animation-delay-200 {
+  animation-delay: 0.2s;
+}
+
+.animation-delay-400 {
+  animation-delay: 0.4s;
+}
+
+@keyframes typing {
+
+  0%,
+  80%,
+  100% {
+    transform: scale(0);
+    opacity: 0.5;
+  }
+
+  40% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
 .weather-layer {
   position: absolute;
   top: 0;
@@ -388,10 +428,9 @@ const startNewChat = () => {
   width: 100%;
   height: 100%;
   z-index: 0;
-  opacity: 0.6; 
+  opacity: 0.6;
 }
 
-/* 2. 🌧️ 雨天效果 */
 .rain-container {
   background: linear-gradient(to bottom, #cfd9df 0%, #e2ebf0 100%);
 }
@@ -400,12 +439,7 @@ const startNewChat = () => {
   position: absolute;
   width: 100%;
   height: 100%;
-  background-image: repeating-linear-gradient(
-    transparent,
-    transparent 50px,
-    rgba(79, 70, 229, 0.3) 50px,
-    rgba(79, 70, 229, 0.3) 53px
-  );
+  background-image: repeating-linear-gradient(transparent, transparent 50px, rgba(79, 70, 229, 0.3) 50px, rgba(79, 70, 229, 0.3) 53px);
   background-size: 2px 100%;
   opacity: 0;
 }
@@ -414,11 +448,12 @@ const startNewChat = () => {
   animation: rain-fall 1s linear infinite;
   opacity: 0.6;
 }
+
 .layer-2 {
-  background-size: 3px 100%; 
+  background-size: 3px 100%;
   animation: rain-fall 0.7s linear infinite;
   opacity: 0.4;
-  left: 20%; 
+  left: 20%;
 }
 
 .rain-overlay {
@@ -426,18 +461,27 @@ const startNewChat = () => {
   bottom: 0;
   width: 100%;
   height: 30%;
-  background: linear-gradient(to top, rgba(255,255,255,1), transparent);
+  background: linear-gradient(to top, rgba(255, 255, 255, 1), transparent);
 }
 
 @keyframes rain-fall {
-  0% { transform: translateY(-100vh); opacity: 0; }
-  50% { opacity: 1; }
-  100% { transform: translateY(100vh); opacity: 0; }
+  0% {
+    transform: translateY(-100vh);
+    opacity: 0;
+  }
+
+  50% {
+    opacity: 1;
+  }
+
+  100% {
+    transform: translateY(100vh);
+    opacity: 0;
+  }
 }
 
-/* 3. ☀️ 晴天效果 */
 .sun-container {
-  background: linear-gradient(to bottom, #fff7e6 0%, #ffffff 100%); 
+  background: linear-gradient(to bottom, #fff7e6 0%, #ffffff 100%);
 }
 
 .sun-glow {
@@ -457,29 +501,173 @@ const startNewChat = () => {
   right: -200px;
   width: 600px;
   height: 600px;
-  background: conic-gradient(
-    from 0deg,
-    transparent 0deg,
-    rgba(251, 191, 36, 0.1) 20deg,
-    transparent 40deg,
-    rgba(251, 191, 36, 0.1) 60deg,
-    transparent 80deg,
-    rgba(251, 191, 36, 0.1) 100deg,
-    transparent 120deg,
-    rgba(251, 191, 36, 0.1) 140deg,
-    transparent 160deg
-  );
+  background: conic-gradient(from 0deg, transparent 0deg, rgba(251, 191, 36, 0.1) 20deg, transparent 40deg, rgba(251, 191, 36, 0.1) 60deg, transparent 80deg);
   border-radius: 50%;
   animation: sun-rotate 20s linear infinite;
 }
 
 @keyframes sun-pulse {
-  0% { transform: scale(1); opacity: 0.8; }
-  100% { transform: scale(1.1); opacity: 1; }
+  0% {
+    transform: scale(1);
+    opacity: 0.8;
+  }
+
+  100% {
+    transform: scale(1.1);
+    opacity: 1;
+  }
 }
 
 @keyframes sun-rotate {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.cloud-container {
+  background: linear-gradient(to bottom, #e0eafc 0%, #cfdef3 100%);
+}
+
+.cloud {
+  background: #fff;
+  border-radius: 100px;
+  position: absolute;
+  margin: 120px auto 20px;
+  opacity: 0.8;
+}
+
+.cloud:after,
+.cloud:before {
+  content: '';
+  position: absolute;
+  background: inherit;
+  z-index: -1;
+}
+
+.cloud:after {
+  width: 100px;
+  height: 100px;
+  top: -50px;
+  left: 50px;
+  border-radius: 100px;
+}
+
+.cloud:before {
+  width: 120px;
+  height: 120px;
+  top: -90px;
+  right: 50px;
+  border-radius: 200px;
+}
+
+.x1 {
+  width: 250px;
+  height: 80px;
+  top: 10px;
+  left: 10%;
+  animation: moveclouds 25s linear infinite;
+  transform: scale(0.6);
+}
+
+.x2 {
+  width: 300px;
+  height: 100px;
+  top: 80px;
+  left: 40%;
+  animation: moveclouds 35s linear infinite;
+  transform: scale(0.8);
+}
+
+.x3 {
+  width: 200px;
+  height: 60px;
+  top: 150px;
+  left: 70%;
+  animation: moveclouds 20s linear infinite;
+  transform: scale(0.4);
+}
+
+@keyframes moveclouds {
+  0% {
+    margin-left: 100%;
+  }
+
+  100% {
+    margin-left: -100%;
+  }
+}
+
+.snow-container {
+  background: linear-gradient(to bottom, #E0EAFC 0%, #CFDEF3 100%);
+}
+
+.snow {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  background-image: radial-gradient(#fff 2px, transparent 2px);
+  background-size: 50px 50px;
+}
+
+.layer-1 {
+  animation: snow-fall 10s linear infinite;
+  opacity: 0.8;
+}
+
+.layer-2 {
+  background-size: 40px 40px;
+  animation: snow-fall 8s linear infinite;
+  opacity: 0.6;
+}
+
+.layer-3 {
+  background-size: 30px 30px;
+  animation: snow-fall 6s linear infinite;
+  opacity: 0.4;
+}
+
+@keyframes snow-fall {
+  0% {
+    background-position: 0 0;
+  }
+
+  100% {
+    background-position: 50px 500px;
+  }
+}
+
+.fog-container {
+  background: #dcdcdc;
+}
+
+.fog-img {
+  position: absolute;
+  height: 100vh;
+  width: 300vw;
+  background: url('https://raw.githubusercontent.com/danielstuart14/CSS_FOG_ANIMATION/master/fog1.png') repeat-x;
+  background-size: contain;
+}
+
+.fog-img-first {
+  animation: fog 60s linear infinite;
+}
+
+.fog-img-second {
+  animation: fog 40s linear infinite;
+  top: 30%;
+}
+
+@keyframes fog {
+  0% {
+    transform: translate3d(0, 0, 0);
+  }
+
+  100% {
+    transform: translate3d(-200vw, 0, 0);
+  }
 }
 </style>

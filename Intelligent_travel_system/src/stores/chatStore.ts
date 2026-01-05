@@ -2,237 +2,285 @@
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
 import http from '../utils/request';
-import type { ChatHistoryResponse, ConversationItem, ChatInitResponse, ChatMessage } from '../types/api';
-import { showToast } from 'vant';
-// ✨ 引入封装好的 SSE 工具
-import { fetchStream } from '../utils/sse-client';
+import { SSEClient, type SSECallback } from '../utils/sse-client';
+import type { ChatMessage, ChatHistoryItem, LocationData } from '../types/api';
+
+interface ExtendedMessage extends ChatMessage {
+  isLoading?: boolean;
+  isThinking?: boolean;
+  tempContent?: string;
+}
 
 export const useChatStore = defineStore('chat', () => {
-  // ==================== 状态定义 ====================
-  const historyList = ref<ConversationItem[]>([]);
-  const messages = ref<ChatMessage[]>([]); 
+  const messages = ref<ExtendedMessage[]>([]);
+  const historyList = ref<ChatHistoryItem[]>([]);
   const currentConversationId = ref<number | null>(null);
   const isStreaming = ref(false);
-  const currentWeather = ref<string>(''); 
-  const userLocation = ref<{ lat: number; lng: number } | null>(null);
+  const currentWeather = ref('');
 
-  // ==================== 核心功能 ====================
+  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
 
-  /**
-   * 初始化会话
-   */
-  const initChat = async (lat?: number, lng?: number) => {
-    try {
-      if (lat && lng) {
-        userLocation.value = { lat, lng };
+  // ✅ 核心修复：升级解析逻辑
+  // 1. 支持 Markdown 图片 ![name](url)
+  // 2. 从百度地图 URL 参数中提取经纬度
+  const extractLocationsFromText = (text: string): LocationData[] => {
+    const locations: LocationData[] = [];
+    
+    // 匹配 Markdown 图片语法: ![alt](url)
+    // 同时也兼容之前的 "地图图片：url" 格式（为了稳健）
+    const markdownImgRegex = /!\[(.*?)\]\((https?:\/\/[^\)]+)\)/g;
+    const legacyImgRegex = /地图图片：(https?:\/\/[^\s\n]+)/g;
+
+    // 辅助函数：解析 URL 中的坐标
+    const parseCoordsFromUrl = (url: string) => {
+      // 百度静态图 URL 通常包含 markers=lng,lat 或 center=lng,lat
+      // 例如: markers=113.252922,23.132124
+      const match = url.match(/(?:markers|center)=([\d\.]+),([\d\.]+)/);
+      if (match) {
+        return { lng: parseFloat(match[1]), lat: parseFloat(match[2]) };
       }
+      return { lng: 0, lat: 0 };
+    };
 
-      const payload = (lat && lng) ? { lat, lng } : {};
-      const res = await http.post<ChatInitResponse>('/chat/init', payload);
+    // 1. 处理 Markdown 图片
+    let match;
+    while ((match = markdownImgRegex.exec(text)) !== null) {
+      const [_, alt, url] = match;
+      const { lng, lat } = parseCoordsFromUrl(url);
       
-      if (res) {
-        if (res.envContext) {
-          currentWeather.value = res.envContext.weather || '';
-        }
-        
-        if (res.welcomeMessage && messages.value.length === 0) {
-          messages.value.push({
-            id: 'welcome-' + Date.now(),
-            role: 'assistant',
-            content: res.welcomeMessage,
-            type: 'text',
-            createdAt: Date.now()
-          });
-        }
-        
-        if (res.conversationId) {
-          currentConversationId.value = res.conversationId;
-        }
+      locations.push({
+        name: alt || '推荐地点',
+        address: '点击卡片查看详情', // 暂时无法精确关联上下文的地址文本，用通用文案
+        lat,
+        lng,
+        mapImageUrl: url,
+        images: [url]
+      });
+    }
+
+    // 2. 处理旧格式（如果混合存在）
+    while ((match = legacyImgRegex.exec(text)) !== null) {
+      const [_, url] = match;
+      // 避免重复添加
+      if (!locations.find(l => l.mapImageUrl === url)) {
+        const { lng, lat } = parseCoordsFromUrl(url);
+        locations.push({
+          name: '推荐地点',
+          address: '点击查看详情',
+          lat,
+          lng,
+          mapImageUrl: url,
+          images: [url]
+        });
       }
-      return res;
+    }
+
+    return locations;
+  };
+
+  const initChat = async (lat: number, lng: number) => {
+    try {
+      const res = await http.post<any>('/chat/init', { lat, lng });
+      const data = (res as any).data || res;
+      
+      if (data) {
+        currentConversationId.value = data.conversationId;
+        if (data.envContext) {
+          currentWeather.value = data.envContext.weather;
+        }
+        messages.value = [{
+          id: Date.now().toString(),
+          role: 'assistant',
+          content: data.welcomeMessage,
+          createdAt: new Date().toISOString(),
+          type: 'text'
+        }];
+      }
     } catch (error) {
-      console.error('初始化会话失败:', error);
-      return null;
+      console.error('初始化会话失败', error);
     }
   };
 
-const sendMessage = async (content: string) => {
-    if (isStreaming.value || !content.trim()) return;
+  // ✅ 核心修复：Promise 封装定位，解决异步导致坐标错误的问题
+  const getGeoLocation = (): Promise<{lat: number, lng: number}> => {
+    return new Promise((resolve) => {
+      if (!navigator.geolocation) {
+        console.warn('浏览器不支持地理定位');
+        resolve({ lat: 23.1291, lng: 113.2644 }); // 默认广州
+        return;
+      }
 
-    // 1. 用户消息上屏
-    messages.value.push({
-      id: `user-${Date.now()}`,
-      role: 'user',
-      content: content,
-      type: 'text',
-      createdAt: Date.now()
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          console.log('定位成功:', pos.coords.latitude, pos.coords.longitude);
+          resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+        },
+        (err) => {
+          console.error('定位失败，使用默认坐标:', err);
+          resolve({ lat: 23.1291, lng: 113.2644 }); // 失败回退
+        },
+        { timeout: 5000, enableHighAccuracy: true }
+      );
     });
+  };
 
-    // 2. AI 消息占位
-    // 默认 isLoading 为 true，这样一开始就会显示加载动画
-    const assistantMsg = ref<ChatMessage>({
-      id: `ai-${Date.now()}`,
+  const sendMessage = async (content: string) => {
+    const userMsg: ExtendedMessage = {
+      id: Date.now().toString(),
+      role: 'user',
+      content,
+      createdAt: new Date().toISOString(),
+      type: 'text'
+    };
+    messages.value.push(userMsg);
+    isStreaming.value = true;
+
+    const assistantMsg = ref<ExtendedMessage>({
+      id: (Date.now() + 1).toString(),
       role: 'assistant',
-      content: '', 
+      content: '',
+      createdAt: new Date().toISOString(),
       type: 'text',
-      isLoading: true, 
-      createdAt: Date.now()
+      isLoading: true,
+      isThinking: true,
+      locations: []
     });
     messages.value.push(assistantMsg.value);
 
-    isStreaming.value = true;
+    // ✅ 修复：等待定位完成后再继续
+    const { lat, lng } = await getGeoLocation();
 
+    const sse = new SSEClient(`${API_BASE_URL}/chat/send`);
+    
     try {
-      // 3. 构造请求体
-      const payload: any = {
+      await sse.connect({
         message: content,
         conversationId: currentConversationId.value,
-      };
-
-      if (userLocation.value) {
-        payload.lat = userLocation.value.lat;
-        payload.lng = userLocation.value.lng;
-      }
-
-      // 4. 使用 fetchStream 处理 SSE
-      await fetchStream('/api/chat/send', payload, {
-        onMessage: (type, data) => {
-          // ============ 核心修改：根据 type 处理状态 ============
-          
-          if (type === 'status') {
-            // 🧠 当后端返回 thinking 时，强制开启加载状态
-            if (data === 'thinking') {
-              assistantMsg.value.isLoading = true;
-            } 
-            // 🗣️ 当后端返回 answering 时，关闭加载状态，准备出字
-            else if (data === 'answering') {
-              assistantMsg.value.isLoading = false;
-            }
+        lat,
+        lng
+      }, (event: SSECallback) => {
+        if (event.event === 'status') {
+          if (event.data === 'thinking') {
+             assistantMsg.value.isThinking = true;
+          } else if (event.data === 'answering') {
+             assistantMsg.value.isThinking = false;
           }
-          
-          else if (type === 'message') {
-            // 收到消息内容时，确保关闭加载动画（双重保险）
-            if (assistantMsg.value.isLoading) {
-              assistantMsg.value.isLoading = false;
-            }
+          return;
+        }
 
-            // 处理 JSON 数据 (location/product) 或 纯文本
-            if (typeof data === 'object' && data !== null) {
-              if (data.location) {
-                 assistantMsg.value.type = 'location';
-                 assistantMsg.value.location = data.location;
-              } else if (data.products) {
-                 assistantMsg.value.type = 'product';
-                 assistantMsg.value.products = data.products;
-              } else {
-                 // 兼容后端可能把文本放在 message 或 content 字段的情况
-                 assistantMsg.value.content += (data.message || data.content || '');
+        if (event.event === 'error') {
+          assistantMsg.value.content = '抱歉，遇到了一些问题，请稍后再试。';
+          assistantMsg.value.isLoading = false;
+          assistantMsg.value.isThinking = false;
+          isStreaming.value = false;
+          return;
+        }
+
+        if (event.event === 'message') {
+          assistantMsg.value.isThinking = false;
+          
+          const rawData = event.data;
+          
+          // 处理结构化 JSON
+          if (typeof rawData === 'object' && rawData !== null) {
+            if (rawData.type === 'start') {
+              if (rawData.conversationId) {
+                currentConversationId.value = rawData.conversationId;
               }
-            } else {
-              // 纯文本拼接
-              assistantMsg.value.content += String(data);
+            }
+            else if (rawData.type === 'text') {
+              if (rawData.content) {
+                assistantMsg.value.content += rawData.content;
+              }
+            }
+            else if (rawData.type === 'location') {
+              // 后端直接返回 location 列表的情况
+              if (Array.isArray(rawData.locations)) {
+                // 合并后端返回的 locations
+                const backendLocations = rawData.locations.map((item: any) => ({
+                  name: item.name,
+                  address: item.address,
+                  lat: item.lat,
+                  lng: item.lng,
+                  mapImageUrl: (item.images && item.images.length > 0) ? item.images[0] : '',
+                  images: item.images
+                }));
+                // 避免重复
+                 assistantMsg.value.locations = [
+                    ...(assistantMsg.value.locations || []),
+                    ...backendLocations
+                 ];
+                 assistantMsg.value.type = 'location';
+              }
+            }
+          } 
+          // 纯文本兼容
+          else {
+             const text = String(rawData).replace(/^"|"$/g, '').replace(/\\n/g, '\n');
+             assistantMsg.value.content += text;
+          }
+
+          // ✅ 实时解析文本中的 Markdown 图片
+          // 每次文本更新都重新解析一遍，确保能捕获最新生成的图片
+          const extractedLocations = extractLocationsFromText(assistantMsg.value.content);
+          if (extractedLocations.length > 0) {
+            // 这里我们采用"并集"策略，或者如果解析到了就优先用解析的
+            // 为了简单，我们直接覆盖 locations（如果后端没发 type:location 事件的话）
+            // 或者如果已经有 locations 了，就不覆盖？
+            // 策略：如果 extractedLocations 数量比当前多，就更新
+            if (extractedLocations.length > (assistantMsg.value.locations?.length || 0)) {
+               assistantMsg.value.locations = extractedLocations;
+               assistantMsg.value.type = 'location';
             }
           }
-          
-          else if (type === 'conversationId') {
-            currentConversationId.value = Number(data);
-          }
-        },
-        onDone: () => {
-          isStreaming.value = false;
+        }
+
+        if (event.event === 'done') {
           assistantMsg.value.isLoading = false;
-        },
-        onError: (err) => {
-          console.error('发送中断:', err);
-          assistantMsg.value.content += '\n[连接中断]';
+          assistantMsg.value.isThinking = false;
           isStreaming.value = false;
-          assistantMsg.value.isLoading = false;
         }
       });
-
-    } catch (error) {
-      console.error('请求失败:', error);
-      assistantMsg.value.content = '[发送失败]';
-      isStreaming.value = false;
+    } catch (err) {
+      console.error('SSE Error:', err);
+      assistantMsg.value.content += '\n[网络连接异常]';
       assistantMsg.value.isLoading = false;
+      assistantMsg.value.isThinking = false;
+      isStreaming.value = false;
     }
   };
-
-  /**
-   * 加载历史会话详情
-   */
-  const loadHistory = async (id: string | number) => {
-    try {
-      messages.value = [];
-      const res = await http.get<ChatHistoryResponse>(`/chat/history/${id}`);
-      messages.value = (res as any) || [];
-      currentConversationId.value = Number(id);
-    } catch (error) {
-      console.error('加载历史失败:', error);
-      showToast('加载历史失败');
-    }
-  };
-
-  // ==================== 历史记录管理 ====================
 
   const fetchHistory = async () => {
     try {
-      const res: any = await http.post('/chat/conversations', { 
-        current: 1, 
-        pageSize: 100 
-      });
+      const res: any = await http.post('/chat/conversations', { current: 1, pageSize: 20 });
       historyList.value = res.records || [];
-    } catch (error) {
-      console.error('获取历史会话失败:', error);
-      historyList.value = [];
+    } catch (e) {
+      console.error(e);
     }
   };
 
-  const deleteConversation = async (id: number) => {
+  const loadHistory = async (id: string | number) => {
     try {
-      await http.delete(`/chat/conversation/${id}`);
-      showToast('删除成功');
-      historyList.value = historyList.value.filter(item => item.id !== id);
-      if (currentConversationId.value === id) {
-        currentConversationId.value = null;
-        messages.value = [];
-      }
-      return true;
-    } catch (error) {
-      console.error('删除会话失败:', error);
-      return false;
-    }
-  };
-
-  const updateConversationTitle = async (id: number, newTitle: string) => {
-    try {
-      await http.put(`/chat/conversation/${id}/title`, { title: newTitle });
-      showToast('修改成功');
-      const item = historyList.value.find(i => i.id === id);
-      if (item) {
-        item.title = newTitle;
-      }
-      return true;
-    } catch (error) {
-      console.error('重命名失败:', error);
-      return false;
+      const res: any = await http.get(`/chat/history/${id}`);
+      currentConversationId.value = Number(id);
+      messages.value = (res || []).map((msg: any) => ({
+        ...msg,
+        type: (msg.locations && msg.locations.length > 0) ? 'location' : 'text'
+      }));
+    } catch (e) {
+      console.error(e);
     }
   };
 
   return {
-    historyList,
     messages,
-    currentMessages: messages,
+    historyList,
     currentConversationId,
     isStreaming,
     currentWeather,
-    userLocation,
     initChat,
     sendMessage,
-    loadHistory,
     fetchHistory,
-    fetchMessages: loadHistory,
-    deleteConversation,
-    updateConversationTitle
+    loadHistory
   };
 });

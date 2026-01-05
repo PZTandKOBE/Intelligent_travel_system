@@ -1,93 +1,116 @@
-/**
- * 处理 POST 方式的 SSE 流式响应
- * @param url 接口地址
- * @param body 请求体
- * @param callbacks 回调集合
- */
-export async function fetchStream(
-  url: string,
-  body: any,
-  callbacks: {
-    // 这里的 type 对应后端 SSE 事件: 'message' | 'status' | 'conversationId' | 'error'
-    onMessage: (type: string, data: any) => void; 
-    onDone?: () => void;
-    onError?: (err: any) => void;
+// src/utils/sse-client.ts
+
+// 定义 SSE 事件回调类型
+export interface SSECallback {
+  event: string; // 'message' | 'status' | 'conversationId' | 'error' | 'done'
+  data: any;
+}
+
+export class SSEClient {
+  private url: string;
+  private controller: AbortController | null = null;
+
+  constructor(url: string) {
+    this.url = url;
   }
-) {
-  try {
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(body),
-      credentials: 'include', // ✅ 核心修改：SSE 请求也要带 Cookie
-    });
 
-    if (!response.ok) {
-      throw new Error(response.statusText);
-    }
+  /**
+   * 连接 SSE 流
+   * @param body 请求体参数
+   * @param onMessage 消息回调
+   */
+  async connect(body: any, onMessage: (payload: SSECallback) => void) {
+    this.controller = new AbortController();
 
-    if (!response.body) {
-      throw new Error('Response body is empty');
-    }
+    try {
+      const response = await fetch(this.url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+        signal: this.controller.signal,
+        credentials: 'include', // 携带 Cookie
+      });
 
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
+      if (!response.body) {
+        throw new Error('Response body is empty');
+      }
 
-      // 解码并拼接到缓冲区
-      buffer += decoder.decode(value, { stream: true });
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
 
-      // 按双换行符切割消息 (标准 SSE 以 \n\n 分隔)
-      const parts = buffer.split('\n\n');
-      // 保留最后一个可能不完整的片段在 buffer 中
-      buffer = parts.pop() || '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
 
-      for (const part of parts) {
-        if (!part.trim()) continue;
+        buffer += decoder.decode(value, { stream: true });
+        
+        // SSE 消息通常以双换行符分隔
+        const parts = buffer.split('\n\n');
+        // 保留最后一个可能不完整的片段
+        buffer = parts.pop() || '';
 
-        const lines = part.split('\n');
-        let eventType = 'message'; // 默认事件类型
-        let dataStr = '';
+        for (const part of parts) {
+          if (!part.trim()) continue;
 
-        for (const line of lines) {
-          if (line.startsWith('event:')) {
-            eventType = line.slice(6).trim();
-          } else if (line.startsWith('data:')) {
-            dataStr = line.slice(5).trim();
+          const lines = part.split('\n');
+          let eventType = 'message';
+          let dataStr = '';
+
+          for (const line of lines) {
+            if (line.startsWith('event:')) {
+              eventType = line.slice(6).trim();
+            } else if (line.startsWith('data:')) {
+              dataStr = line.slice(5).trim();
+            }
           }
-        }
 
-        if (dataStr) {
-          // 如果收到 [DONE]，则结束
-          if (dataStr === '[DONE]') {
-            callbacks.onDone?.();
-            return;
-          }
+          if (dataStr) {
+            if (dataStr === '[DONE]') {
+              onMessage({ event: 'done', data: null });
+              return;
+            }
 
-          // 尝试解析 JSON 数据
-          try {
-            // 如果后端返回的是普通字符串且用引号包裹，这里也能解析
-            // 如果是对象结构，解析为对象
-            const parsedData = JSON.parse(dataStr);
-            callbacks.onMessage(eventType, parsedData);
-          } catch (e) {
-            // 解析失败则按纯文本处理
-            callbacks.onMessage(eventType, dataStr);
+            let parsedData = dataStr;
+            try {
+              parsedData = JSON.parse(dataStr);
+            } catch (e) {
+              // 无法解析为 JSON，保持原字符串
+            }
+
+            onMessage({ event: eventType, data: parsedData });
           }
         }
       }
-    }
-    
-    // 循环结束也算完成
-    callbacks.onDone?.();
 
-  } catch (err) {
-    callbacks.onError?.(err);
+      // 流结束
+      onMessage({ event: 'done', data: null });
+
+    } catch (error: any) {
+      if (error.name === 'AbortError') {
+        console.log('SSE connection aborted');
+      } else {
+        console.error('SSE Error:', error);
+        onMessage({ event: 'error', data: error.message });
+      }
+    } finally {
+      this.controller = null;
+    }
+  }
+
+  /**
+   * 中断连接
+   */
+  abort() {
+    if (this.controller) {
+      this.controller.abort();
+      this.controller = null;
+    }
   }
 }

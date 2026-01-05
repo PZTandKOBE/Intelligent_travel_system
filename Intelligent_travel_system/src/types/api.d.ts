@@ -43,7 +43,7 @@ export interface LocationData {
   rating?: number;
   distance?: string;
   images?: string[];
-  mapImageUrl?: string;
+  mapImageUrl?: string; // 前端展示用的地图图片字段
 }
 
 export interface ProductData {
@@ -56,13 +56,15 @@ export interface ProductData {
 }
 
 export interface ChatMessage {
-  id: string;
+  id: string | number;
   role: 'user' | 'assistant';
   content: string;
   type: MessageType;
-  location?: LocationData;
+  location?: LocationData; // 兼容单个地点（旧逻辑）
+  locations?: LocationData[]; // ✅ 新增：支持后端返回的地点列表
   products?: ProductData[];
   isLoading?: boolean;
+  isThinking?: boolean;
   createdAt: string | number;
 }
 
@@ -78,17 +80,16 @@ export interface ChatInitResponse {
   };
 }
 
-// ✅ 核心修改：增加 lastMessage 字段
 export interface ConversationItem {
   id: number;
   userId: number;
   title: string;
   createdAt: string;
   updatedAt: string;
-  lastMessage?: string; // 新增这一行，解决报错
+  lastMessage?: string;
 }
 
-// 历史记录响应
+export type ChatHistoryItem = ConversationItem;
 export type ChatHistoryResponse = ChatMessage[];
 
 // 游览报告项
