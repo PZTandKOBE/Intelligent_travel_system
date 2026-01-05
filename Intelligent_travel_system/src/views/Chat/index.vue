@@ -206,7 +206,7 @@ import { useChatStore } from '../../stores/chatStore';
 import { showConfirmDialog } from 'vant';
 import LocationCard from './LocationCard.vue';
 import ProductCard from './ProductCard.vue';
-import MarkdownIt from 'markdown-it'; // 引入 Markdown-it
+import MarkdownIt from 'markdown-it'; 
 
 const route = useRoute();
 const router = useRouter();
@@ -216,13 +216,32 @@ const chatContainer = ref<HTMLElement | null>(null);
 
 const showHistory = ref(false);
 const currentConversationId = computed(() => chatStore.currentConversationId);
-const title = computed(() => route.query.id ? '历史回顾' : '非遗伴游');
+
+// =================== 核心修复：动态计算标题 ===================
+const title = computed(() => {
+  // 1. 如果是在查看历史记录（URL 里有 id）
+  if (route.query.id) {
+    const id = Number(route.query.id);
+    const item = chatStore.historyList.find(i => i.id === id);
+    return item?.title || '历史回顾';
+  }
+  
+  // 2. 如果是当前正在聊天的会话（Store 里有 id）
+  if (currentConversationId.value) {
+    const item = chatStore.historyList.find(i => i.id === currentConversationId.value);
+    // 如果找到了标题，就显示标题，否则显示默认
+    return item?.title || '非遗伴游';
+  }
+  
+  return '非遗伴游';
+});
+// ============================================================
 
 // 初始化 Markdown 实例
 const md = new MarkdownIt({
-  html: true,       // 允许 HTML (为了渲染图片)
-  linkify: true,    // 自动转换链接
-  breaks: true      // 换行符转 <br>
+  html: true,       
+  linkify: true,    
+  breaks: true      
 });
 
 const quickActions = [
@@ -243,9 +262,6 @@ const isFoggy = computed(() => /雾|fog|mist|haze/i.test(w.value));
 
 /**
  * 消息渲染函数
- * 1. 预处理文本中的非标准图片格式
- * 2. 使用 markdown-it 渲染
- * 3. 后处理 img 标签样式
  */
 const renderMessage = (content: string) => {
   if (!content) return '';
@@ -253,12 +269,10 @@ const renderMessage = (content: string) => {
   let processedContent = content;
 
   // 1. 转换自定义格式 -> Markdown 图片格式
-  // "地图图片：url" -> "![]()"
   processedContent = processedContent.replace(
     /地图图片：(https?:\/\/[^\s\n<]+)/g, 
     '![]($1)'
   );
-  // "（图片：url）" -> "![]()"
   processedContent = processedContent.replace(
     /（图片：(https?:\/\/[^\s\n）<]+)）/g,
     '![]($1)'
@@ -267,13 +281,11 @@ const renderMessage = (content: string) => {
   // 2. Markdown 渲染
   let html = md.render(processedContent);
 
-  // 3. 样式注入：给渲染出来的 img 添加 Tailwind 类
-  // 处理标准 Markdown 图片
+  // 3. 样式注入
   html = html.replace(
     /<img src="(.*?)" alt="(.*?)">/g, 
     '<img src="$1" alt="$2" class="chat-image rounded-xl my-2 max-w-full h-auto shadow-sm border border-gray-100" loading="lazy" />'
   );
-  // 处理自闭合标签
   html = html.replace(
     /<img src="(.*?)" alt="(.*?)" \/>/g, 
     '<img src="$1" alt="$2" class="chat-image rounded-xl my-2 max-w-full h-auto shadow-sm border border-gray-100" loading="lazy" />'
