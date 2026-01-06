@@ -14,7 +14,7 @@ interface ExtendedMessage extends ChatMessage {
 }
 
 // ✅ 配置打字机效果参数
-const TYPING_SPEED = 150; // 打字间隔 (毫秒)，越大越慢
+const TYPING_SPEED = 50; // 打字间隔 (毫秒)，越大越慢
 const CHUNK_SIZE = 1;    // 每次渲染多少个字符，1=逐字渲染
 
 export const useChatStore = defineStore('chat', () => {
