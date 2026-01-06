@@ -44,8 +44,14 @@
         <van-icon name="wap-nav" size="24" class="text-gray-700" @click="showHistory = true" />
       </template>
       <template #right>
-        <div @click="router.push('/user')" class="flex items-center justify-center w-9 h-9 bg-white/50 backdrop-blur-md rounded-full cursor-pointer hover:bg-white/80 transition-all shadow-sm active:scale-95">
-          <span class="text-base">👤</span>
+        <div @click="router.push('/user')" class="flex items-center justify-center w-9 h-9 bg-white/50 backdrop-blur-md rounded-full cursor-pointer hover:bg-white/80 transition-all shadow-sm active:scale-95 overflow-hidden">
+           <img 
+            v-if="userStore.userInfo?.userAvatar" 
+            :src="userStore.userInfo.userAvatar" 
+            class="w-full h-full object-cover"
+            alt="用户"
+           />
+           <span v-else class="text-base">👤</span>
         </div>
       </template>
     </van-nav-bar>
@@ -108,8 +114,14 @@
             </template>
           </div>
 
-          <div v-if="msg.role === 'user'" class="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center ml-3 flex-shrink-0 border-2 border-white shadow-sm">
-            <span class="text-xl">👤</span>
+          <div v-if="msg.role === 'user'" class="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center ml-3 flex-shrink-0 border-2 border-white shadow-sm overflow-hidden">
+            <img 
+              v-if="userStore.userInfo?.userAvatar" 
+              :src="userStore.userInfo.userAvatar" 
+              class="w-full h-full object-cover"
+              alt="User"
+            />
+            <span v-else class="text-xl">👤</span>
           </div>
         </div>
       </div>
@@ -203,6 +215,7 @@
 import { ref, onMounted, nextTick, watch, computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useChatStore } from '../../stores/chatStore';
+import { useUserStore } from '../../stores/userStore'; // ✅ 引入 userStore
 import { showConfirmDialog } from 'vant';
 import LocationCard from './LocationCard.vue';
 import ProductCard from './ProductCard.vue';
@@ -211,31 +224,26 @@ import MarkdownIt from 'markdown-it';
 const route = useRoute();
 const router = useRouter();
 const chatStore = useChatStore();
+const userStore = useUserStore(); // ✅ 初始化 userStore
 const inputContent = ref('');
 const chatContainer = ref<HTMLElement | null>(null);
 
 const showHistory = ref(false);
 const currentConversationId = computed(() => chatStore.currentConversationId);
 
-// =================== 核心修复：动态计算标题 ===================
+// 动态计算标题
 const title = computed(() => {
-  // 1. 如果是在查看历史记录（URL 里有 id）
   if (route.query.id) {
     const id = Number(route.query.id);
     const item = chatStore.historyList.find(i => i.id === id);
     return item?.title || '历史回顾';
   }
-  
-  // 2. 如果是当前正在聊天的会话（Store 里有 id）
   if (currentConversationId.value) {
     const item = chatStore.historyList.find(i => i.id === currentConversationId.value);
-    // 如果找到了标题，就显示标题，否则显示默认
     return item?.title || '非遗伴游';
   }
-  
   return '非遗伴游';
 });
-// ============================================================
 
 // 初始化 Markdown 实例
 const md = new MarkdownIt({
@@ -267,21 +275,10 @@ const renderMessage = (content: string) => {
   if (!content) return '';
   
   let processedContent = content;
-
-  // 1. 转换自定义格式 -> Markdown 图片格式
-  processedContent = processedContent.replace(
-    /地图图片：(https?:\/\/[^\s\n<]+)/g, 
-    '![]($1)'
-  );
-  processedContent = processedContent.replace(
-    /（图片：(https?:\/\/[^\s\n）<]+)）/g,
-    '![]($1)'
-  );
-
-  // 2. Markdown 渲染
+  // Markdown 渲染
   let html = md.render(processedContent);
 
-  // 3. 样式注入
+  // 样式注入
   html = html.replace(
     /<img src="(.*?)" alt="(.*?)">/g, 
     '<img src="$1" alt="$2" class="chat-image rounded-xl my-2 max-w-full h-auto shadow-sm border border-gray-100" loading="lazy" />'
