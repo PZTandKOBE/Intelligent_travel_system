@@ -108,3 +108,54 @@ export interface UpdatePasswordRequest {
   newPassword: string;
   confirmPassword: string;
 }
+
+export interface QuizQuestion {
+  id: number;
+  questionText: string;
+  questionType: 'single' | 'multiple' | 'boolean';
+  options: string[];
+  points: number;
+  difficulty: number;
+}
+
+export interface GameSession {
+  gameRecordId: number;
+  questions: QuizQuestion[];
+  totalQuestions: number;
+  startedAt: string;
+}
+
+export interface AnswerResult {
+  correct: boolean;
+  correctAnswer: string;
+  explanation: string;
+  points: number;
+  totalScore: number;
+  correctCount: number;
+  answeredCount: number;
+}
+
+export interface GameResult {
+  id: number;
+  userId: number;
+  gameMode: string;
+  totalQuestions: number;
+  correctCount: number;
+  totalScore: number;
+  accuracy: number;
+  timeSpent: number;
+  status: string;
+  startedAt: string;
+  completedAt: string;
+}
+
+export interface RankingItem {
+  rank: number;
+  userId: number;
+  username: string;
+  avatar: string;
+  points: number;
+  level: number;
+  totalGames: number;
+  bestAccuracy: number;
+}

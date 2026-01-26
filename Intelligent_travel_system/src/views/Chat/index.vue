@@ -77,6 +77,13 @@
                   : 'bg-white/90 backdrop-blur-sm text-gray-800 rounded-tl-sm border border-gray-100 shadow-gray-100'
               ]"
             >
+              <img 
+                v-if="(msg as any).tempContent" 
+                :src="(msg as any).tempContent" 
+                class="rounded-lg mb-2 max-w-full border border-white/20" 
+                alt="发送的图片"
+              />
+
               <div v-if="msg.isThinking && !msg.content" class="flex items-center space-x-1 py-1 h-6">
                  <div class="typing-dot"></div>
                  <div class="typing-dot animation-delay-200"></div>
@@ -172,7 +179,7 @@
     </van-popup>
 
     <div class="bg-white/80 backdrop-blur-xl border-t border-gray-100/50 safe-area-bottom relative z-50 shadow-[0_-4px_20px_rgba(0,0,0,0.02)] flex flex-col">
-      <div class="flex gap-2 px-4 pt-3 pb-1 overflow-x-auto no-scrollbar w-full">
+      <div class="flex gap-2 px-4 pt-3 pb-1 overflow-x-auto no-scrollbar w-full" v-if="!showVoicePanel">
         <button
           v-for="item in quickActions"
           :key="item"
@@ -183,15 +190,36 @@
           {{ item }}
         </button>
       </div>
+
       <div class="flex items-center gap-3 px-4 py-3">
+        <button 
+          @click="toggleVoicePanel" 
+          class="p-2 rounded-full text-gray-500 hover:text-blue-600 hover:bg-gray-100 transition-colors"
+        >
+           <svg v-if="showVoicePanel" xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+           </svg>
+           <svg v-else xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+           </svg>
+        </button>
+
         <input 
           v-model="inputContent" 
           @keyup.enter="handleSend"
           type="text" 
           class="flex-1 bg-gray-100/80 rounded-full px-5 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:bg-white transition-all placeholder-gray-400"
-          placeholder="问问附近的非遗体验..." 
-          :disabled="chatStore.isStreaming"
+          :placeholder="showVoicePanel ? '按住下方按钮说话...' : '问问附近的非遗体验...'" 
+          :disabled="chatStore.isStreaming || showVoicePanel"
         />
+
+        <button @click="triggerImageUpload" class="p-2 rounded-full text-gray-500 hover:text-blue-600 hover:bg-gray-100 transition-colors">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+          </svg>
+        </button>
+        <input type="file" ref="fileInput" accept="image/*" class="hidden" @change="handleFileChange" />
+
         <button 
           @click="handleSend"
           :disabled="!inputContent.trim() || chatStore.isStreaming"
@@ -207,31 +235,58 @@
           </svg>
         </button>
       </div>
+
+      <div v-if="showVoicePanel" class="bg-gray-50 border-t border-gray-100 p-8 flex justify-center items-center h-48 transition-all animate-slide-up">
+         <div class="relative">
+           <button 
+             @mousedown="startRecording" 
+             @mouseup="stopRecording" 
+             @touchstart.prevent="startRecording" 
+             @touchend.prevent="stopRecording"
+             :class="[
+               'w-24 h-24 rounded-full flex items-center justify-center text-4xl shadow-xl select-none transition-all duration-200',
+               isRecording ? 'bg-indigo-500 text-white scale-110 ring-8 ring-indigo-200' : 'bg-white text-indigo-500 hover:shadow-2xl'
+             ]"
+           >
+             🎙️
+           </button>
+           <div v-if="isRecording" class="absolute inset-0 rounded-full animate-ping bg-indigo-400 opacity-20 z-0"></div>
+         </div>
+         <p class="absolute bottom-6 text-gray-400 text-sm font-medium">{{ isRecording ? '松开结束' : '按住说话' }}</p>
+      </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, nextTick, watch, computed } from 'vue';
+import { ref, onMounted, nextTick, watch, computed, onUnmounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useChatStore } from '../../stores/chatStore';
-import { useUserStore } from '../../stores/userStore'; // ✅ 引入 userStore
-import { showConfirmDialog } from 'vant';
+import { useUserStore } from '../../stores/userStore';
+import { showConfirmDialog, showToast } from 'vant';
 import LocationCard from './LocationCard.vue';
 import ProductCard from './ProductCard.vue';
 import MarkdownIt from 'markdown-it'; 
+// 🌟 引入语音处理工具
+import { XFVoiceClient } from '../../utils/xf-voice';
 
 const route = useRoute();
 const router = useRouter();
 const chatStore = useChatStore();
-const userStore = useUserStore(); // ✅ 初始化 userStore
+const userStore = useUserStore();
 const inputContent = ref('');
 const chatContainer = ref<HTMLElement | null>(null);
 
 const showHistory = ref(false);
 const currentConversationId = computed(() => chatStore.currentConversationId);
 
-// 动态计算标题
+// ==================== 新增：语音与图片相关状态 ====================
+const isRecording = ref(false);
+const showVoicePanel = ref(false);
+const fileInput = ref<HTMLInputElement | null>(null);
+let voiceClient: XFVoiceClient | null = null;
+
+// ==================== 动态计算标题 ====================
 const title = computed(() => {
   if (route.query.id) {
     const id = Number(route.query.id);
@@ -245,7 +300,7 @@ const title = computed(() => {
   return '非遗伴游';
 });
 
-// 初始化 Markdown 实例
+// ==================== Markdown 配置 ====================
 const md = new MarkdownIt({
   html: true,       
   linkify: true,    
@@ -260,7 +315,7 @@ const quickActions = [
   '🏺 历史渊源'
 ];
 
-// 天气状态判断
+// ==================== 天气状态判断 ====================
 const w = computed(() => (chatStore.envContext.weather || '').toLowerCase());
 const isRainy = computed(() => /雨|rain|shower|drizzle|storm/i.test(w.value));
 const isSunny = computed(() => /晴|sunny|clear/i.test(w.value));
@@ -275,7 +330,6 @@ const renderMessage = (content: string) => {
   if (!content) return '';
   
   let processedContent = content;
-  // Markdown 渲染
   let html = md.render(processedContent);
 
   // 样式注入
@@ -332,6 +386,10 @@ const initOrLoad = async () => {
 watch(() => route.query.id, () => { initOrLoad(); });
 onMounted(() => { initOrLoad(); });
 
+onUnmounted(() => {
+  if (voiceClient) voiceClient.stop();
+});
+
 const handleBack = () => {
   if (route.query.id) router.back();
   else showHistory.value = true;
@@ -348,7 +406,58 @@ const handleSend = () => {
   inputContent.value = '';
 };
 
-// 手势相关
+// ==================== 新增：图片上传逻辑 ====================
+const triggerImageUpload = () => {
+  fileInput.value?.click();
+};
+
+const handleFileChange = (event: Event) => {
+  const target = event.target as HTMLInputElement;
+  if (target.files && target.files[0]) {
+    const file = target.files[0];
+    if (file.size > 10 * 1024 * 1024) {
+      showToast('图片不能超过 10MB');
+      return;
+    }
+    // 调用 chatStore 新增的 sendImageMessage 方法
+    // (注意：请确保 chatStore 已实现此方法)
+    chatStore.sendImageMessage(file, inputContent.value); 
+    inputContent.value = '';
+    scrollToBottom();
+  }
+  if (target.value) target.value = '';
+};
+
+// ==================== 新增：语音输入逻辑 ====================
+const toggleVoicePanel = () => {
+  showVoicePanel.value = !showVoicePanel.value;
+};
+
+const startRecording = async () => {
+  isRecording.value = true;
+  if (!voiceClient) {
+    voiceClient = new XFVoiceClient(
+      (text, isFinal) => {
+        // 将识别到的文字追加到输入框
+        inputContent.value += text;
+      },
+      (err) => {
+        showToast(err);
+        isRecording.value = false;
+      }
+    );
+  }
+  await voiceClient.start();
+};
+
+const stopRecording = () => {
+  if (voiceClient) {
+    voiceClient.stop();
+  }
+  isRecording.value = false;
+};
+
+// ==================== 手势相关 ====================
 const touchStart = ref({ x: 0, y: 0 });
 const minSwipeDistance = 50; 
 const handleTouchStart = (e: TouchEvent) => {
@@ -410,6 +519,15 @@ const confirmDelete = (id: number) => {
   --van-nav-bar-background: rgba(255, 255, 255, 0.6);
   --van-nav-bar-title-text-color: #1f2937;
   backdrop-filter: blur(10px);
+}
+
+.animate-slide-up {
+  animation: slideUp 0.3s ease-out;
+}
+
+@keyframes slideUp {
+  from { transform: translateY(100%); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
 }
 
 /* ==================== Markdown 样式 ==================== */
@@ -512,7 +630,7 @@ const confirmDelete = (id: number) => {
   }
 }
 
-/* ==================== 天气背景动画 CSS ==================== */
+/* ==================== 天气背景动画 CSS (完全保留) ==================== */
 .weather-layer {
   position: absolute;
   top: 0;
@@ -689,7 +807,6 @@ const confirmDelete = (id: number) => {
   position: absolute;
   height: 100vh;
   width: 300vw;
-  /* 使用一个可靠的雾图片源，或者使用本地资源 */
   background: url('https://raw.githubusercontent.com/danielstuart14/CSS_FOG_ANIMATION/master/fog1.png') repeat-x;
   background-size: contain;
 }

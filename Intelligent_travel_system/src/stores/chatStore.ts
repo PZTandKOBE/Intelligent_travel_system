@@ -412,8 +412,98 @@ export const useChatStore = defineStore('chat', () => {
     } catch (error) { return false; }
   };
 
+  // ==================== 新增：发送图片消息 ====================
+  const sendImageMessage = async (file: File, caption?: string) => {
+    // 1. 本地预览消息
+    const tempUrl = URL.createObjectURL(file);
+    messages.value.push({
+      id: Date.now().toString(),
+      role: 'user',
+      content: caption || '【发送了图片】',
+      type: 'image', // 假设 ExtendedMessage 类型或前端展示逻辑支持 image 类型
+      // 如果前端没有专门的 image 类型支持，可以临时用 text 存 "[图片]"，
+      // 但最好在 views/Chat/index.vue 里处理 content 包含 "blob:" 的情况
+      tempContent: tempUrl // 用于前端展示图片
+    } as any);
+
+    isStreaming.value = true;
+    textBuffer = ''; 
+    
+    // AI 占位消息
+    const assistantMsg = ref<ExtendedMessage>({
+      id: (Date.now() + 1).toString(),
+      role: 'assistant',
+      content: '',
+      createdAt: new Date().toISOString(),
+      type: 'text',
+      isLoading: true,
+      isThinking: true,
+      locations: []
+    });
+    messages.value.push(assistantMsg.value);
+
+    const { lat, lng } = userLocation.value;
+    
+    // 构造 FormData
+    const formData = new FormData();
+    formData.append('file', file);
+    if (currentConversationId.value) {
+      formData.append('conversationId', currentConversationId.value.toString());
+    }
+    if (caption) formData.append('message', caption);
+    formData.append('lat', lat.toString());
+    formData.append('lng', lng.toString());
+
+    // 使用 SSE 发送
+    const sse = new SSEClient(`${API_BASE_URL}/chat/send/image`);
+    
+    try {
+      // connect 方法现在支持 FormData
+      await sse.connect(formData, (event: SSECallback) => {
+        // ... 复用 sendMessage 中的 SSE 处理逻辑 (ID, status, message, done) ...
+        // 为了避免重复代码，建议把 SSE 处理逻辑抽离成 handleSSEResponse 函数
+        // 这里简单起见，请直接复制 sendMessage 中的 SSE 回调逻辑到这里
+        
+        if (event.event === 'conversationId') {
+          currentConversationId.value = Number(event.data);
+          // 首次不需要自动标题，图片对话通常不需要改标题
+        }
+        else if (event.event === 'status') {
+           if (event.data === 'thinking') assistantMsg.value.isThinking = true;
+           else if (event.data === 'answering') {
+             assistantMsg.value.isThinking = false;
+             startTypingLoop(assistantMsg.value);
+           }
+        }
+        else if (event.event === 'message') {
+           assistantMsg.value.isThinking = false;
+           startTypingLoop(assistantMsg.value);
+           const rawData = event.data;
+           if (typeof rawData === 'object' && rawData?.type === 'text') {
+             textBuffer += rawData.content;
+           } else if (rawData?.type === 'location') {
+             // 同样的地点处理逻辑
+             const backendLocations = (rawData.locations || []).map((item: any) => ({
+                 name: item.name, address: item.address, lat: item.lat, lng: item.lng,
+                 mapImageUrl: getStaticMapUrl(item.lat, item.lng), images: item.images || []
+              }));
+              assistantMsg.value.locations = [...(assistantMsg.value.locations || []), ...backendLocations];
+              assistantMsg.value.type = 'location';
+           }
+        }
+        else if (event.event === 'done') {
+          isStreaming.value = false;
+        }
+      });
+    } catch (err) {
+      console.error(err);
+      textBuffer += '\n[图片分析失败]';
+      isStreaming.value = false;
+    }
+  };
+
   return {
     messages, historyList, currentConversationId, isStreaming, envContext, userLocation,
-    initChat, resetChat, sendMessage, fetchHistory, loadHistory, deleteConversation, updateConversationTitle, initLocation
+    initChat, resetChat, sendMessage, fetchHistory, loadHistory, deleteConversation, updateConversationTitle, initLocation, sendImageMessage
   };
 });

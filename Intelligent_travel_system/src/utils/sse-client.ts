@@ -1,8 +1,7 @@
 // src/utils/sse-client.ts
 
-// 定义 SSE 事件回调类型
 export interface SSECallback {
-  event: string; // 'message' | 'status' | 'conversationId' | 'error' | 'done'
+  event: string;
   data: any;
 }
 
@@ -14,23 +13,26 @@ export class SSEClient {
     this.url = url;
   }
 
-  /**
-   * 连接 SSE 流
-   * @param body 请求体参数
-   * @param onMessage 消息回调
-   */
   async connect(body: any, onMessage: (payload: SSECallback) => void) {
     this.controller = new AbortController();
 
     try {
+      const headers: HeadersInit = {};
+      let requestBody = body;
+
+      // ✅ 关键修改：如果是 FormData，不要设置 Content-Type，让浏览器自动处理 Boundary
+      // 否则保持 application/json
+      if (!(body instanceof FormData)) {
+        headers['Content-Type'] = 'application/json';
+        requestBody = JSON.stringify(body);
+      }
+
       const response = await fetch(this.url, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(body),
+        headers: headers,
+        body: requestBody,
         signal: this.controller.signal,
-        credentials: 'include', // 携带 Cookie
+        credentials: 'include',
       });
 
       if (!response.ok) {
@@ -50,10 +52,7 @@ export class SSEClient {
         if (done) break;
 
         buffer += decoder.decode(value, { stream: true });
-        
-        // SSE 消息通常以双换行符分隔
         const parts = buffer.split('\n\n');
-        // 保留最后一个可能不完整的片段
         buffer = parts.pop() || '';
 
         for (const part of parts) {
@@ -76,26 +75,20 @@ export class SSEClient {
               onMessage({ event: 'done', data: null });
               return;
             }
-
             let parsedData = dataStr;
             try {
               parsedData = JSON.parse(dataStr);
             } catch (e) {
-              // 无法解析为 JSON，保持原字符串
+              // ignore
             }
-
             onMessage({ event: eventType, data: parsedData });
           }
         }
       }
-
-      // 流结束
       onMessage({ event: 'done', data: null });
 
     } catch (error: any) {
-      if (error.name === 'AbortError') {
-        console.log('SSE connection aborted');
-      } else {
+      if (error.name !== 'AbortError') {
         console.error('SSE Error:', error);
         onMessage({ event: 'error', data: error.message });
       }
@@ -104,9 +97,6 @@ export class SSEClient {
     }
   }
 
-  /**
-   * 中断连接
-   */
   abort() {
     if (this.controller) {
       this.controller.abort();
