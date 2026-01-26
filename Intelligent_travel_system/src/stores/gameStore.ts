@@ -13,28 +13,49 @@ export const useGameStore = defineStore('game', () => {
   const lastResult = ref<GameResult | null>(null);
   
   // 排行榜数据
-  const weeklyRanking = ref<RankingItem[]>([]);
+  const rankingList = ref<RankingItem[]>([]);
   const myRank = ref<number | null>(null);
+  const currentRankingType = ref<'weekly' | 'monthly'>('weekly');
 
   // 开始游戏
-  const startGame = async (mode = 'normal', difficulty = 1) => {
+  const startGame = async (mode = 'normal', difficulty = 1, projectName?: string) => {
     try {
-      const res = await http.post<GameSession>('/quiz/start', {
+      const payload: any = {
         gameMode: mode,
         difficulty,
-        questionCount: 5 // 默认 5 题
-      });
-      // 兼容后端返回结构，如果包裹在 data 里，request.ts 可能已经处理了解包，或者需要手动处理
-      // 假设 request.ts 自动解包 data
-      const data = (res as any).data || res;
+        questionCount: 5 
+      };
       
+      if (projectName && projectName.trim()) {
+        payload.projectName = projectName.trim();
+      }
+
+      const data = await http.post<GameSession>('/quiz/start', payload) as unknown as GameSession;
+      
+      // 🛠️ 【数据修补 1】修复 options 为 null 的问题
+      if (data && data.questions) {
+        data.questions.forEach(q => {
+          if (!q.options || q.options.length === 0) {
+            console.warn(`题目 ID ${q.id} 缺少选项，已使用默认数据填充`);
+            q.options = ['选项A (数据缺失)', '选项B (数据缺失)', '选项C (数据缺失)', '选项D (数据缺失)'];
+          }
+          if (!q.questionType) {
+            q.questionType = 'single';
+          }
+        });
+      }
+
       currentSession.value = data;
       currentQuestionIndex.value = 0;
-      if (data.questions && data.questions.length > 0) {
+      
+      if (data && data.questions && data.questions.length > 0) {
         currentQuestion.value = data.questions[0];
         isPlaying.value = true;
+        return true;
+      } else {
+        showToast('题库暂无题目');
+        return false;
       }
-      return true;
     } catch (e) {
       console.error(e);
       showToast('开始游戏失败');
@@ -47,14 +68,25 @@ export const useGameStore = defineStore('game', () => {
     if (!currentSession.value || !currentQuestion.value) return null;
 
     try {
-      const res = await http.post<AnswerResult>('/quiz/answer', {
+      const rawResult = await http.post<any>('/quiz/answer', {
         gameRecordId: currentSession.value.gameRecordId,
         questionId: currentQuestion.value.id,
         userAnswer: answer,
         timeSpent
-      });
-      const result = (res as any).data || res;
-      return result; // 返回给 UI 显示对错和解析
+      }) as unknown as any;
+
+      // 🛠️ 【数据修补 2】修复字段不一致 (isCorrect -> correct)
+      const result: AnswerResult = {
+        correct: rawResult.isCorrect !== undefined ? rawResult.isCorrect : rawResult.correct,
+        points: rawResult.score !== undefined ? rawResult.score : rawResult.points,
+        correctAnswer: rawResult.correctAnswer,
+        explanation: rawResult.explanation,
+        totalScore: rawResult.totalScore,
+        correctCount: 0, 
+        answeredCount: 0 
+      };
+      
+      return result; 
     } catch (e) {
       showToast('提交失败');
       return null;
@@ -69,7 +101,6 @@ export const useGameStore = defineStore('game', () => {
       currentQuestion.value = currentSession.value.questions[currentQuestionIndex.value];
       return true;
     } else {
-      // 题目做完了
       return false;
     }
   };
@@ -78,8 +109,28 @@ export const useGameStore = defineStore('game', () => {
   const completeGame = async () => {
     if (!currentSession.value) return;
     try {
-      const res = await http.post<GameResult>(`/quiz/complete/${currentSession.value.gameRecordId}`);
-      lastResult.value = (res as any).data || res;
+      // 1. 获取原始数据 (any)
+      const rawRes = await http.post<any>(`/quiz/complete/${currentSession.value.gameRecordId}`) as unknown as any;
+      
+      // 2. 🛠️ 【数据修补 3】计算 timeSpent
+      let finalTimeSpent = rawRes.timeSpent;
+      if (finalTimeSpent === null || finalTimeSpent === undefined) {
+        // 如果后端没返回时间，手动计算：结束时间 - 开始时间
+        if (rawRes.startedAt && rawRes.completedAt) {
+          const start = new Date(rawRes.startedAt).getTime();
+          const end = new Date(rawRes.completedAt).getTime();
+          finalTimeSpent = Math.floor((end - start) / 1000); // 转为秒
+        } else {
+          finalTimeSpent = 0;
+        }
+      }
+
+      const res: GameResult = {
+        ...rawRes,
+        timeSpent: finalTimeSpent
+      };
+
+      lastResult.value = res;
       isPlaying.value = false;
       currentSession.value = null;
     } catch (e) {
@@ -88,15 +139,20 @@ export const useGameStore = defineStore('game', () => {
   };
 
   // 获取排行榜
-  const fetchRankings = async () => {
+  const fetchRankings = async (type: 'weekly' | 'monthly' = 'weekly') => {
     try {
-      const res = await http.get<RankingItem[]>('/quiz/ranking/weekly?topN=20');
-      weeklyRanking.value = (res as any).data || res;
+      currentRankingType.value = type;
       
-      const myRes = await http.get<number>('/quiz/ranking/my');
-      myRank.value = (myRes as any).data;
+      const list = await http.get<RankingItem[]>(`/quiz/ranking/${type}?topN=20`) as unknown as RankingItem[];
+      rankingList.value = Array.isArray(list) ? list : [];
+      
+      const rank = await http.get<number>('/quiz/ranking/my') as unknown as number;
+      myRank.value = rank; 
+
     } catch (e) {
       console.error(e);
+      rankingList.value = []; 
+      myRank.value = null;
     }
   };
 
@@ -106,8 +162,9 @@ export const useGameStore = defineStore('game', () => {
     currentQuestion,
     currentQuestionIndex,
     lastResult,
-    weeklyRanking,
+    rankingList,
     myRank,
+    currentRankingType,
     startGame,
     submitAnswer,
     nextQuestion,

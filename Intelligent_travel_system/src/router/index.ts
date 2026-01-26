@@ -7,7 +7,8 @@ import Chat from '../views/Chat/index.vue';
 import User from '../views/User/index.vue';
 import Document from '../views/User/Document.vue'; 
 import History from '../views/Chat/History.vue';
-import Password from '../views/User/Password.vue'; // ✅ 新增引入
+import Password from '../views/User/Password.vue'; 
+import Game from '../views/Game/index.vue';
 
 const routes: RouteRecordRaw[] = [
   {
@@ -46,12 +47,17 @@ const routes: RouteRecordRaw[] = [
     component: Document,
     meta: { title: '游览报告', requiresAuth: true }
   },
-  // ✅ 新增路由：修改密码
   {
     path: '/user/password',
     name: 'UserPassword',
     component: Password,
     meta: { title: '修改密码', requiresAuth: true }
+  },
+  {
+    path: '/game',
+    name: 'Game',
+    component: Game,
+    meta: { title: '非遗知识闯关', requiresAuth: true }
   }
 ];
 

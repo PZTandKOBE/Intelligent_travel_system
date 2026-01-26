@@ -192,6 +192,17 @@
       </div>
 
       <div class="flex items-center gap-3 px-4 py-3">
+        
+        <button 
+          @click="router.push('/game')"
+          class="p-2 rounded-full text-yellow-500 bg-yellow-50 hover:bg-yellow-100 hover:text-yellow-600 border border-yellow-200 shadow-sm transition-all active:scale-95 flex-shrink-0"
+          title="知识闯关"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+          </svg>
+        </button>
+
         <button 
           @click="toggleVoicePanel" 
           class="p-2 rounded-full text-gray-500 hover:text-blue-600 hover:bg-gray-100 transition-colors"
