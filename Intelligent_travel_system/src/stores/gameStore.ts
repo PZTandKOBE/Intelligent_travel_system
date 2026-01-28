@@ -20,29 +20,40 @@ export const useGameStore = defineStore('game', () => {
   // 开始游戏
   const startGame = async (mode = 'normal', difficulty = 1, projectName?: string) => {
     try {
+      // 📝 修改点：显式构造 payload，确保 projectName 字段始终存在
+      // 即使是空字符串，也传过去，明确告诉后端"为空"
       const payload: any = {
         gameMode: mode,
         difficulty,
-        questionCount: 5 
+        questionCount: 5,
+        projectName: projectName ? projectName.trim() : "" 
       };
-      
-      if (projectName && projectName.trim()) {
-        payload.projectName = projectName.trim();
-      }
 
       const data = await http.post<GameSession>('/quiz/start', payload) as unknown as GameSession;
-      
-      // 🛠️ 【数据修补 1】修复 options 为 null 的问题
+
+      // 🛡️🛡️🛡️【数据防御与清洗】🛡️🛡️🛡️
       if (data && data.questions) {
-        data.questions.forEach(q => {
+        data.questions.forEach((q, index) => {
+          // 情况 1: 如果 options 是 null 或空数组
           if (!q.options || q.options.length === 0) {
-            console.warn(`题目 ID ${q.id} 缺少选项，已使用默认数据填充`);
-            q.options = ['选项A (数据缺失)', '选项B (数据缺失)', '选项C (数据缺失)', '选项D (数据缺失)'];
+            console.warn(`⚠️ [GameStore] 第 ${index + 1} 题 (ID: ${q.id}) 缺少选项！已触发自动修复。`);
+            q.options = [
+              '选项A (数据缺失)', 
+              '选项B (数据缺失)', 
+              '选项C (数据缺失)', 
+              '选项D (数据缺失)'
+            ];
+          } 
+          else {
+            q.options = q.options.map(opt => opt.replace(/^[A-Z]\.\s*/, ''));
           }
+          
           if (!q.questionType) {
             q.questionType = 'single';
           }
         });
+      } else {
+        console.error('❌ [GameStore] 返回数据中缺少 questions 字段！');
       }
 
       currentSession.value = data;
@@ -57,7 +68,7 @@ export const useGameStore = defineStore('game', () => {
         return false;
       }
     } catch (e) {
-      console.error(e);
+      console.error('❌ [GameStore] startGame 发生异常:', e);
       showToast('开始游戏失败');
       return false;
     }
@@ -68,6 +79,8 @@ export const useGameStore = defineStore('game', () => {
     if (!currentSession.value || !currentQuestion.value) return null;
 
     try {
+      console.log(`🚀 [GameStore] 提交答案: 题目ID=${currentQuestion.value.id}, 答案=${answer}, 用时=${timeSpent}`);
+      
       const rawResult = await http.post<any>('/quiz/answer', {
         gameRecordId: currentSession.value.gameRecordId,
         questionId: currentQuestion.value.id,
@@ -75,7 +88,6 @@ export const useGameStore = defineStore('game', () => {
         timeSpent
       }) as unknown as any;
 
-      // 🛠️ 【数据修补 2】修复字段不一致 (isCorrect -> correct)
       const result: AnswerResult = {
         correct: rawResult.isCorrect !== undefined ? rawResult.isCorrect : rawResult.correct,
         points: rawResult.score !== undefined ? rawResult.score : rawResult.points,
@@ -88,6 +100,7 @@ export const useGameStore = defineStore('game', () => {
       
       return result; 
     } catch (e) {
+      console.error('❌ [GameStore] 提交失败:', e);
       showToast('提交失败');
       return null;
     }
@@ -109,17 +122,14 @@ export const useGameStore = defineStore('game', () => {
   const completeGame = async () => {
     if (!currentSession.value) return;
     try {
-      // 1. 获取原始数据 (any)
       const rawRes = await http.post<any>(`/quiz/complete/${currentSession.value.gameRecordId}`) as unknown as any;
       
-      // 2. 🛠️ 【数据修补 3】计算 timeSpent
       let finalTimeSpent = rawRes.timeSpent;
       if (finalTimeSpent === null || finalTimeSpent === undefined) {
-        // 如果后端没返回时间，手动计算：结束时间 - 开始时间
         if (rawRes.startedAt && rawRes.completedAt) {
           const start = new Date(rawRes.startedAt).getTime();
           const end = new Date(rawRes.completedAt).getTime();
-          finalTimeSpent = Math.floor((end - start) / 1000); // 转为秒
+          finalTimeSpent = Math.floor((end - start) / 1000);
         } else {
           finalTimeSpent = 0;
         }
