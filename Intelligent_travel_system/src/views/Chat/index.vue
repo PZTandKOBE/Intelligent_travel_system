@@ -56,7 +56,11 @@
       </template>
     </van-nav-bar>
 
-    <div class="flex-1 overflow-y-auto p-4 space-y-6 relative z-10" ref="chatContainer">
+    <div 
+      class="flex-1 overflow-y-auto p-4 space-y-6 relative z-10" 
+      ref="chatContainer"
+      @scroll="handleScroll"
+    >
       <div v-for="msg in chatStore.messages" :key="msg.id" class="flex flex-col">
         <div class="text-center text-xs text-gray-400/80 mb-3 scale-90">
           {{ formatTime(msg.createdAt) }}
@@ -278,7 +282,6 @@ import { showConfirmDialog, showToast } from 'vant';
 import LocationCard from './LocationCard.vue';
 import ProductCard from './ProductCard.vue';
 import MarkdownIt from 'markdown-it'; 
-// 🌟 引入语音处理工具
 import { XFVoiceClient } from '../../utils/xf-voice';
 
 const route = useRoute();
@@ -291,13 +294,14 @@ const chatContainer = ref<HTMLElement | null>(null);
 const showHistory = ref(false);
 const currentConversationId = computed(() => chatStore.currentConversationId);
 
-// ==================== 新增：语音与图片相关状态 ====================
+// 🌟 核心状态：判断用户是否正在向上翻阅历史记录
+const isUserScrolling = ref(false);
+
 const isRecording = ref(false);
 const showVoicePanel = ref(false);
 const fileInput = ref<HTMLInputElement | null>(null);
 let voiceClient: XFVoiceClient | null = null;
 
-// ==================== 动态计算标题 ====================
 const title = computed(() => {
   if (route.query.id) {
     const id = Number(route.query.id);
@@ -311,7 +315,6 @@ const title = computed(() => {
   return '非遗伴游';
 });
 
-// ==================== Markdown 配置 ====================
 const md = new MarkdownIt({
   html: true,       
   linkify: true,    
@@ -326,7 +329,6 @@ const quickActions = [
   '🏺 历史渊源'
 ];
 
-// ==================== 天气状态判断 ====================
 const w = computed(() => (chatStore.envContext.weather || '').toLowerCase());
 const isRainy = computed(() => /雨|rain|shower|drizzle|storm/i.test(w.value));
 const isSunny = computed(() => /晴|sunny|clear/i.test(w.value));
@@ -334,16 +336,10 @@ const isCloudy = computed(() => /云|阴|cloud|overcast/i.test(w.value));
 const isSnowy = computed(() => /雪|snow|blizzard/i.test(w.value));
 const isFoggy = computed(() => /雾|fog|mist|haze/i.test(w.value));
 
-/**
- * 消息渲染函数
- */
 const renderMessage = (content: string) => {
   if (!content) return '';
-  
   let processedContent = content;
   let html = md.render(processedContent);
-
-  // 样式注入
   html = html.replace(
     /<img src="(.*?)" alt="(.*?)">/g, 
     '<img src="$1" alt="$2" class="chat-image rounded-xl my-2 max-w-full h-auto shadow-sm border border-gray-100" loading="lazy" />'
@@ -352,7 +348,6 @@ const renderMessage = (content: string) => {
     /<img src="(.*?)" alt="(.*?)" \/>/g, 
     '<img src="$1" alt="$2" class="chat-image rounded-xl my-2 max-w-full h-auto shadow-sm border border-gray-100" loading="lazy" />'
   );
-
   return html;
 };
 
@@ -366,16 +361,36 @@ const formatTime = (time: string | number) => {
       : `${date.getMonth() + 1}/${date.getDate()} ${date.getHours()}:${date.getMinutes().toString().padStart(2, '0')}`;
 };
 
-const scrollToBottom = () => {
+// 🌟 滚动处理函数：判断用户是否偏离底部
+const handleScroll = () => {
+  if (!chatContainer.value) return;
+  const { scrollTop, scrollHeight, clientHeight } = chatContainer.value;
+  // 如果距离底部超过 50px，则认为用户正在浏览历史
+  isUserScrolling.value = scrollHeight - scrollTop - clientHeight > 50;
+};
+
+// 🌟 智能滚动函数
+const scrollToBottom = (force = false) => {
   nextTick(() => {
     if (chatContainer.value) {
-      chatContainer.value.scrollTop = chatContainer.value.scrollHeight;
+      // 只有在强制滚动，或者用户当前就在底部附近时，才执行滚动
+      if (force || !isUserScrolling.value) {
+        chatContainer.value.scrollTop = chatContainer.value.scrollHeight;
+        if (force) isUserScrolling.value = false; // 强制滚动后，重置状态
+      }
     }
   });
 };
 
-watch(() => chatStore.messages.length, scrollToBottom);
-watch(() => chatStore.messages[chatStore.messages.length - 1], () => scrollToBottom(), { deep: true });
+// 🌟 监听：新消息增加 -> 强制滚动
+watch(() => chatStore.messages.length, () => {
+  scrollToBottom(true);
+});
+
+// 🌟 监听：消息内容变化（打字机效果）-> 智能滚动
+watch(() => chatStore.messages[chatStore.messages.length - 1], () => {
+  scrollToBottom(false);
+}, { deep: true });
 
 watch(showHistory, (newVal) => {
   if (newVal) chatStore.fetchHistory();
@@ -386,12 +401,11 @@ const initOrLoad = async () => {
   if (historyId) {
     await chatStore.loadHistory(historyId);
   } else {
-    // 只有在没有消息且未初始化过的情况才初始化
     if (chatStore.messages.length === 0) {
       await chatStore.initChat();
     }
   }
-  scrollToBottom();
+  scrollToBottom(true); // 初始化强制到底部
 };
 
 watch(() => route.query.id, () => { initOrLoad(); });
@@ -417,7 +431,6 @@ const handleSend = () => {
   inputContent.value = '';
 };
 
-// ==================== 新增：图片上传逻辑 ====================
 const triggerImageUpload = () => {
   fileInput.value?.click();
 };
@@ -430,16 +443,13 @@ const handleFileChange = (event: Event) => {
       showToast('图片不能超过 10MB');
       return;
     }
-    // 调用 chatStore 新增的 sendImageMessage 方法
-    // (注意：请确保 chatStore 已实现此方法)
     chatStore.sendImageMessage(file, inputContent.value); 
     inputContent.value = '';
-    scrollToBottom();
+    scrollToBottom(true);
   }
   if (target.value) target.value = '';
 };
 
-// ==================== 新增：语音输入逻辑 ====================
 const toggleVoicePanel = () => {
   showVoicePanel.value = !showVoicePanel.value;
 };
@@ -449,7 +459,6 @@ const startRecording = async () => {
   if (!voiceClient) {
     voiceClient = new XFVoiceClient(
       (text, isFinal) => {
-        // 将识别到的文字追加到输入框
         inputContent.value += text;
       },
       (err) => {
@@ -468,7 +477,6 @@ const stopRecording = () => {
   isRecording.value = false;
 };
 
-// ==================== 手势相关 ====================
 const touchStart = ref({ x: 0, y: 0 });
 const minSwipeDistance = 50; 
 const handleTouchStart = (e: TouchEvent) => {
@@ -479,7 +487,7 @@ const handleTouchEnd = (e: TouchEvent) => {
   const deltaX = touchEnd.x - touchStart.value.x;
   const deltaY = touchEnd.y - touchStart.value.y;
   if (Math.abs(deltaX) > minSwipeDistance && Math.abs(deltaY) < 50) {
-    if (deltaX < 0) showHistory.value = true; // 左滑显示历史
+    if (deltaX < 0) showHistory.value = true; 
   }
 };
 
@@ -565,7 +573,7 @@ const confirmDelete = (id: number) => {
 }
 .message-content :deep(strong) {
   font-weight: 600;
-  color: #4f46e5; /* indigo-600 */
+  color: #4f46e5; 
 }
 .message-content :deep(code) {
   background-color: rgba(0, 0, 0, 0.05);
@@ -573,7 +581,7 @@ const confirmDelete = (id: number) => {
   border-radius: 0.2em;
   font-family: monospace;
   font-size: 0.9em;
-  color: #e11d48; /* rose-600 */
+  color: #e11d48; 
 }
 .message-content :deep(pre) {
   background-color: #f8fafc;
@@ -641,7 +649,7 @@ const confirmDelete = (id: number) => {
   }
 }
 
-/* ==================== 天气背景动画 CSS (完全保留) ==================== */
+/* ==================== 天气背景动画 CSS ==================== */
 .weather-layer {
   position: absolute;
   top: 0;
